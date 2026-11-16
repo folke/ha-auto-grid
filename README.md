@@ -655,6 +655,9 @@ be customized with the `--auto-grid-gap` CSS property; otherwise it uses HA's
   title, or reserved height. Cached cards remain visible while refreshing. An empty
   grid stays connected and subscribed so it can populate again. Loading/empty
   placeholders remain available with `show_empty: true` or in HA's editor preview.
+- Masonry layouts receive HA's `card-updated` event only when the reported card size
+  changes. Initially hidden grids can be redistributed after loading, without a
+  loading placeholder or relayout on ordinary `hass` updates.
 - Query errors and helper failures are shown in the card, with a Retry button.
 
 ### Registry changes

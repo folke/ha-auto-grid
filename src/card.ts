@@ -23,6 +23,8 @@ export class AutoGrid extends LitElement {
   private currentHass?: HomeAssistant
   private currentPreview = false
   private currentLayout?: string
+  private sizeUpdate = 0
+  private reportedSize = 0
   private grid = new GridController(
     async (config) => {
       const card = await (await loadHelpers()).createCardElement(config)
@@ -93,9 +95,17 @@ export class AutoGrid extends LitElement {
     // Don't set `hidden`: HA removes hidden cards from the DOM, preventing query recovery.
     this.toggleAttribute("empty", this.hideEmpty)
     this.requestUpdate()
-    void this.updateComplete.then(() => {
-      if (!this.isConnected) return
+    const update = ++this.sizeUpdate
+    void this.updateComplete.then(async () => {
+      if (!this.isConnected || update !== this.sizeUpdate) return
+      const size = await this.getCardSize()
+      if (!this.isConnected || update !== this.sizeUpdate) return
       this.dispatchEvent(new CustomEvent("card-size-changed", { bubbles: true, composed: true }))
+      if (size !== this.reportedSize) {
+        this.reportedSize = size
+        // Masonry listens for card-updated, not card-size-changed.
+        this.dispatchEvent(new CustomEvent("card-updated", { bubbles: true, composed: true }))
+      }
     })
   }
 

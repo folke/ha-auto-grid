@@ -66,6 +66,8 @@
           card: { name: { type: "entity" } },
         }
         const grid = document.createElement("auto-grid")
+        let sizeUpdates = 0
+        grid.addEventListener("card-updated", () => sizeUpdates++)
         grid.setConfig(config)
         grid.hass = hass
         assert(subscriptions.length === 0, "no subscription while disconnected")
@@ -124,12 +126,17 @@
         )
         assert((await grid.getCardSize()) === 1, "card size uses row maxima")
         assert(!grid.shadowRoot.querySelector(".card-header"), "title is optional")
+        const updatesAfterInitialResult = sizeUpdates
         let mutations = 0
         const observer = new MutationObserver(() => mutations++)
         observer.observe(grid.shadowRoot, { subtree: true, childList: true, attributes: true })
         for (let i = 0; i < 100; i++) grid.hass = { ...hass, states: { generation: i } }
         await tick()
         assert(mutations === 0, "hass updates do not touch grid DOM")
+        assert(
+          sizeUpdates === updatesAfterInitialResult,
+          "ordinary hass updates do not ask Masonry to relayout"
+        )
         assert(a.hass.states.generation === 99, "updated state reaches children")
         emit(0, ["light.b", "light.a", "light.c"])
         await tick()
@@ -699,6 +706,104 @@
         assert(
           registryQueries().length === 3 && registryRequests.every(({ closed }) => closed),
           "disconnect cancels pending refreshes and releases all shared registry listeners"
+        )
+        const masonry = document.createElement("div")
+        const masonryColumns = Array.from({ length: 3 }, () => {
+          const column = document.createElement("div")
+          masonry.append(column)
+          return column
+        })
+        const masonryRequests = []
+        const masonryConnection = {
+          subscribeMessage(callback, request) {
+            const entry = { callback, request, closed: false }
+            masonryRequests.push(entry)
+            return Promise.resolve(() => {
+              entry.closed = true
+            })
+          },
+        }
+        const masonryCards = Array.from({ length: 3 }, (_, index) => {
+          const card = document.createElement("auto-grid")
+          card.setConfig({
+            columns: 1,
+            include: {
+              entity_id: Array.from({ length: 6 }, (_, i) => `light.masonry_${index}_${i}`),
+            },
+            sort: [],
+          })
+          card.hass = { connection: masonryConnection, states: {} }
+          return card
+        })
+        document.body.append(masonry)
+        let placement = 0
+        const placeMasonryCards = async () => {
+          const iteration = ++placement
+          const sizes = [0, 0, 0],
+            counts = [0, 0, 0]
+          for (const card of masonryCards) {
+            const size = await card.getCardSize()
+            if (iteration !== placement) return
+            let column = 0
+            for (let i = 0; i < sizes.length; i++) {
+              if (sizes[i] < 5) {
+                column = i
+                break
+              }
+              if (sizes[i] < sizes[column]) column = i
+            }
+            sizes[column] += size
+            const before = masonryColumns[column].children[counts[column]++] ?? null
+            if (before !== card) masonryColumns[column].insertBefore(card, before)
+          }
+        }
+        masonry.addEventListener("card-updated", () => {
+          void placeMasonryCards()
+        })
+        await placeMasonryCards()
+        await tick()
+        assert(
+          masonryColumns[0].children.length === 3,
+          "native Masonry placement initially packs zero-size cards into one column"
+        )
+        const initialMasonryQueries = masonryRequests.filter(
+          ({ request }) => request.type === "render_template"
+        )
+        initialMasonryQueries.forEach(({ callback }, index) =>
+          callback({
+            result: Array.from({ length: 6 }, (_, i) => ({
+              entity: `light.masonry_${index}_${i}`,
+              group: 0,
+            })),
+          })
+        )
+        await tick()
+        await tick()
+        assert(
+          masonryColumns.every((column) => column.children.length === 1),
+          "card-updated redistributes loaded grids across Masonry columns"
+        )
+        assert(
+          masonryCards.every(
+            (card) =>
+              card.shadowRoot.querySelectorAll("test-tile").length === 6 &&
+              !card.shadowRoot.querySelector('[role="status"]')
+          ),
+          "Masonry moves retain loaded cards without restoring placeholders"
+        )
+        const settledPlacement = placement
+        for (const card of masonryCards)
+          card.hass = { connection: masonryConnection, states: { generation: 1 } }
+        await tick()
+        assert(
+          placement === settledPlacement,
+          "ordinary state forwarding does not cause Masonry reflows"
+        )
+        masonry.remove()
+        await tick()
+        assert(
+          masonryRequests.every(({ closed }) => closed),
+          "Masonry removal releases nested queries and registry listeners"
         )
         observer.disconnect()
         grid.remove()
