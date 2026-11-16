@@ -1,6 +1,7 @@
 import { LitElement, css, html, nothing } from "lit"
 import { repeat } from "lit/directives/repeat.js"
 import { GridController } from "./grid.ts"
+import { AutoGridEditor, prepareEditor } from "./editor.ts"
 import { normalizeConfig } from "./query.ts"
 import type { AutoGridConfig, CardHelpers, GridConfig, HomeAssistant } from "./types.ts"
 
@@ -34,6 +35,11 @@ export class AutoGrid extends LitElement {
     },
     () => this.gridChanged()
   )
+
+  static async getConfigElement(): Promise<HTMLElement> {
+    await prepareEditor()
+    return new AutoGridEditor()
+  }
 
   static getStubConfig(): AutoGridConfig {
     return { columns: 2, include: { type: "light" }, card: { type: "tile" } }

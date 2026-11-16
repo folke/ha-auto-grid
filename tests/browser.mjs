@@ -4,10 +4,11 @@ import { createServer } from "node:http"
 import { readFile } from "node:fs/promises"
 
 const root = new URL("../", import.meta.url)
+const page = process.argv[2] === "editor" ? "editor" : "browser"
 const server = createServer(async (request, response) => {
   const path =
-    request.url === "/tests/browser.html"
-      ? "tests/browser.html"
+    request.url === `/tests/${page}.html`
+      ? `tests/${page}.html`
       : request.url === "/dist/auto-grid.js"
         ? "dist/auto-grid.js"
         : undefined
@@ -33,7 +34,7 @@ try {
       "--disable-dev-shm-usage",
       "--dump-dom",
       "--virtual-time-budget=5000",
-      `http://127.0.0.1:${port}/tests/browser.html`,
+      `http://127.0.0.1:${port}/tests/${page}.html`,
     ])
     let stdout = "",
       stderr = ""
@@ -58,7 +59,7 @@ try {
     })
   })
   assert.match(output, /<body data-status="passed">/, output)
-  console.log(output.match(/Passed \d+ browser assertions/)?.[0])
+  console.log(`${page}: ${output.match(/Passed \d+ browser assertions/)?.[0]}`)
 } finally {
   server.close()
 }

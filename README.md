@@ -21,7 +21,50 @@ type: module
 
 For the local deploy recipe below, use `/local/community/ha-auto-grid/auto-grid.js`.
 Refresh the browser after registering or updating the resource. Add a **Manual** card
-and paste one of the configurations below. Configuration is currently YAML-only.
+and paste one of the configurations below. A focused visual editor is available for
+layout and the shared `card:` configuration; selection rules remain YAML-based.
+
+## Visual editor
+
+The editor uses three independent collapsible sections, matching HA's card editors:
+
+- **Content** starts collapsed: title, columns (`auto` is supported), square cells, and
+  **Show when empty**, in a compact form. Columns help appears under its own field.
+- **Selection** starts expanded: a naturally sized YAML editor for `include`, `exclude`,
+  `group`, `sort`, and `limit`. It replaces only those fields; omitting a key removes
+  that setting. Per-include card overrides remain part of this YAML. A valid selection
+  must still contain `include`; unknown root fields and invalid rules are rejected.
+- **Card** starts collapsed: HA's native card editor, so tiles and custom cards such as
+  Mushroom use their own controls. Only the top-level `card:` is edited here.
+
+Panels retain their open/closed state during edits, and collapsed contents remain
+mounted so YAML drafts, cursor positions, and nested-editor state survive. Invalid
+selection drafts don't overwrite the last valid configuration or reset when another
+panel changes. Use HA's outer **Show code editor** for less common root fields such as
+visibility or Styler configuration; the inline selection editor preserves them.
+
+The native child editor is automatically given the first matching entity to supply
+capability context for things like light features. Its own entity picker is the only
+sample selector: choosing another entity makes an editor-local manual override, while
+an automatically chosen sample follows the current results. With no matches, it is
+left unset. Sample entities are never persisted as `card.entity` and don't affect
+selection. The sample uses the same compiled query and subscription as the live HA
+preview where possible, and releases its consumer when disconnected or in card YAML
+mode. Opening the editor doesn't add default configuration values.
+
+**Card YAML** edits only the global card object and can also change its type. Cards
+containing `$` properties automatically use card-only YAML, with visual mode disabled
+until the templates are removed; native editors never receive those unknown keys.
+Ordinary Mushroom Jinja strings are passed through untouched. Cards without a usable
+visual editor fall back to YAML without changing the saved configuration. Invalid
+card YAML, selection, and layout values are shown inline and are not emitted as
+configuration changes.
+
+The editor uses HA's internal `hui-card-element-editor`, `ha-yaml-editor`, and
+`ha-expansion-panel`, with card-YAML/native-details fallbacks if necessary. Native
+editor dependencies are loaded through HA's tile card editor. These components are not a
+stable public API; frontend compatibility still needs testing across HA versions.
+The editor is bundled into `auto-grid.js`, so no additional resource is needed.
 
 ## Pool lights
 
@@ -735,10 +778,13 @@ reuse. If Python 3 with Jinja2 is available, it also executes generated queries 
 sandbox with mocked HA helpers; otherwise that optional check is skipped.
 
 `pnpm test:browser` requires Chromium (`CHROME_BIN` can override the executable).
-It builds the bundle and tests rendering, identity-preserving reordering, zero DOM
-mutations on state updates, empty-state recovery, preview, errors, and teardown in a
-real headless browser. The card helpers and backend are mocked: live HA compatibility
-still needs testing on your installation.
+It builds the bundle and runs separate rendering and editor browser suites, covering
+identity-preserving reordering, zero DOM mutations on state updates, empty-state
+recovery, preview, errors, and teardown. Editor checks cover native delegation,
+shared automatic samples, manual entity isolation, inline selection YAML, preserved
+root fields, panel/draft retention, YAML fallback, and template safety.
+The card helpers, backend, and native HA editor components are mocked: live HA
+compatibility still needs testing on your installation.
 
 ### Local deployment
 
