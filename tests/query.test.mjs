@@ -14,7 +14,8 @@ test("defaults to two columns of tiles and include/name sorting without mutating
   assert.equal(normalizeConfig({ include: [], show_empty: true }).show_empty, true)
   assert.deepEqual(config.card, { type: "tile", name: { type: "entity" } })
   assert.match(config.query.template, /sort0/)
-  assert.match(config.query.template, /states\[entity\].name/)
+  assert.match(config.query.template, /entity_name\(entity, fallback=true\)/)
+  assert.doesNotMatch(config.query.template, /states\[entity\].name/)
   config.card.name.type = "device"
   assert.deepEqual(input, original)
 })
@@ -54,10 +55,7 @@ test("literal entity IDs avoid a full state scan; wildcard IDs don't", () => {
 })
 
 test("explicit sort replaces defaults; empty sorts disable all sorting including tie-breaker", () => {
-  assert.doesNotMatch(
-    query({ domain: "light" }, { sort: { by: "state" } }),
-    /states\[entity\].name/
-  )
+  assert.doesNotMatch(query({ domain: "light" }, { sort: { by: "state" } }), /entity_name\(/)
   assert.doesNotMatch(query({ domain: "light" }, { sort: [] }), /sort\(/)
   assert.match(query({ domain: "light" }, { sort: { by: "name" } }), /sort\(attribute='entity'\)/)
 })

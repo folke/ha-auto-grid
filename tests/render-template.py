@@ -55,7 +55,20 @@ for case in payload:
     calls = {}
     env = ImmutableSandboxedEnvironment(undefined=StrictUndefined)
     env.tests["search"] = lambda value, pattern: re.search(pattern, value) is not None
+    def entity_name(entity, *, fallback=False):
+        entry = case.get("registry", {}).get(entity)
+        if entry is not None:
+            name = entry.get("entity_name")
+            if not name and fallback and entry.get("next_name_part") == "device":
+                device = case.get("devices", {}).get(entry.get("device_id"))
+                if device is not None:
+                    return device.get("name_by_user") or device.get("name")
+            return name
+        state = states.values.get(entity)
+        return state.name if state else None
+
     env.globals.update(
+        entity_name=entity_name,
         states=states,
         state_attr=lambda entity, attribute: states.values[entity].attributes.get(attribute),
         is_number=is_number,

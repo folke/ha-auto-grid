@@ -389,3 +389,89 @@ test(
     })
   }
 )
+
+test(
+  "name matching and sorting use modern entity names with device fallback",
+  {
+    skip: python.status !== 0 ? "Optional check requires Python 3 with jinja2 installed" : false,
+  },
+  () => {
+    const states = {
+      "sensor.temperature": { state: "20", name: "AAA Pool controller Temperature" },
+      "sensor.energy": { state: "12", name: "ZZZ Pool controller Energy" },
+      "sensor.main": { state: "on", name: "000 Legacy pump" },
+      "sensor.unregistered": { state: "on", name: "Manual" },
+      "sensor.unnamed": { state: "on", name: "Legacy name shouldn't leak" },
+    }
+    const registry = {
+      "sensor.temperature": { entity_name: "Temperature", device_id: "controller" },
+      "sensor.energy": { entity_name: "Energy", device_id: "controller" },
+      "sensor.main": { entity_name: "", next_name_part: "device", device_id: "pump" },
+      "sensor.unnamed": { entity_name: "", next_name_part: null },
+    }
+    const devices = { pump: { name: "Original pump", name_by_user: "Pump" } }
+    const ordered = [
+      "sensor.unnamed",
+      "sensor.energy",
+      "sensor.unregistered",
+      "sensor.main",
+      "sensor.temperature",
+    ]
+    const cases = [
+      [{ include: { domain: "sensor", name: "Temperature" } }, ["sensor.temperature"]],
+      [{ include: { domain: "sensor", name: "AAA Pool controller Temperature" } }, []],
+      [{ include: { domain: "sensor", name: "Pump" } }, ["sensor.main"]],
+      [{ include: { domain: "sensor", name: "Original pump" } }, []],
+      [{ include: { domain: "sensor", name: "Manual" } }, ["sensor.unregistered"]],
+      [{ include: { domain: "sensor", name: "T*" } }, ["sensor.temperature"]],
+      [{ include: { domain: "sensor", name: "/^P/" } }, ["sensor.main"]],
+      [{ include: { domain: "sensor", name: "" } }, ["sensor.unnamed"]],
+      [
+        { include: { domain: "sensor", any: [{ name: "Pump" }, { name: "Energy" }] } },
+        ["sensor.energy", "sensor.main"],
+      ],
+      [
+        { include: { domain: "sensor" }, exclude: { name: "Pump" } },
+        ordered.filter((id) => id !== "sensor.main"),
+      ],
+      [{ include: { domain: "sensor" } }, ordered],
+      [
+        { include: { domain: "sensor" }, sort: { by: "name", reverse: true } },
+        [...ordered].reverse(),
+      ],
+      [
+        { include: { domain: "sensor" }, sort: { by: "attribute", attribute: "friendly_name" } },
+        [
+          "sensor.energy",
+          "sensor.main",
+          "sensor.temperature",
+          "sensor.unnamed",
+          "sensor.unregistered",
+        ],
+      ],
+    ]
+    const output = spawnSync(
+      "python3",
+      [fileURLToPath(new URL("./render-template.py", import.meta.url))],
+      {
+        input: JSON.stringify(
+          cases.map(([config]) => ({
+            template: normalizeConfig(config).query.template,
+            states,
+            registry,
+            devices,
+          }))
+        ),
+        encoding: "utf8",
+      }
+    )
+    assert.equal(output.status, 0, output.stderr)
+    JSON.parse(output.stdout).forEach((actual, i) => {
+      assert.deepEqual(
+        actual.result.map(({ entity }) => entity),
+        cases[i][1],
+        JSON.stringify(cases[i][0])
+      )
+    })
+  }
+)

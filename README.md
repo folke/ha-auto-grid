@@ -108,22 +108,22 @@ selects every entity with a state. Be mindful of HA's rate limits for broad quer
 Lists of values for a single rule match any value (**OR**). Filters are compiled to
 one Jinja query and subscribed through HA's `render_template` WebSocket API.
 
-| Rule           | Value                                                            |
-| -------------- | ---------------------------------------------------------------- |
-| `area`         | Area ID/name, or a list                                          |
-| `floor`        | Floor ID/name, or a list                                         |
-| `device`       | Device ID, or a list                                             |
-| `label`        | Label ID/name, or a list                                         |
-| `domain`       | Exact domain name, or a list, e.g. `light`                       |
-| `entity_id`    | Exact ID, wildcard, `/regex/`, or a list                         |
-| `device_class` | Shorthand for matching `attributes.device_class`; string or list |
-| `hidden`       | Boolean; whether HA's entity registry marks the entity as hidden |
-| `state`        | Exact value, wildcard, `/regex/`, numeric comparison, or a list  |
-| `name`         | State object's friendly name, with the same matching syntax      |
-| `attributes`   | Map of attribute names to matching values                        |
-| `all`          | List of filters, all must match                                  |
-| `any`          | List of filters, at least one must match                         |
-| `not`          | A filter that must not match                                     |
+| Rule           | Value                                                                |
+| -------------- | -------------------------------------------------------------------- |
+| `area`         | Area ID/name, or a list                                              |
+| `floor`        | Floor ID/name, or a list                                             |
+| `device`       | Device ID, or a list                                                 |
+| `label`        | Label ID/name, or a list                                             |
+| `domain`       | Exact domain name, or a list, e.g. `light`                           |
+| `entity_id`    | Exact ID, wildcard, `/regex/`, or a list                             |
+| `device_class` | Shorthand for matching `attributes.device_class`; string or list     |
+| `hidden`       | Boolean; whether HA's entity registry marks the entity as hidden     |
+| `state`        | Exact value, wildcard, `/regex/`, numeric comparison, or a list      |
+| `name`         | Entity's own name, with device fallback and the same matching syntax |
+| `attributes`   | Map of attribute names to matching values                            |
+| `all`          | List of filters, all must match                                      |
+| `any`          | List of filters, at least one must match                             |
+| `not`          | A filter that must not match                                         |
 
 Area/floor/device/label membership uses HA's corresponding `*_entities()` helper
 semantics. An area includes entities assigned through a device. `device_class` and
@@ -210,8 +210,12 @@ Whenever sorting is enabled, entity ID is the final ascending tie-breaker for
 predictable ordering. **`sort: []` disables all sorting**, including that fallback,
 and retains include-group order followed by candidate order within each group.
 
-`name` means the HA state object's name, not `card.name` or necessarily the contextual
-device/area name rendered by a modern tile.
+Both the `name` filter and `sort.by: name` use HA's
+`entity_name(entity, fallback=true)`: the entity's own registry name, falling back to
+its device name when it has no own name and delegates naming to that device. Entities
+without registry entries use the state object's name. This follows HA's modern naming
+model rather than the legacy/composed `friendly_name` attribute. It does not evaluate
+`card.name` or compose area/device/entity parts from the card configuration.
 
 `limit` applies last, after selection, global exclusion, deduplication, and sorting.
 `limit: 0` returns an empty list. There are no per-include limits.

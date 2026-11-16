@@ -150,7 +150,7 @@ function predicate(filter: Filter, sets: Map<string, string>): string {
     } else if (key === "state") {
       expressions.push(match("states(entity)", value as Selection))
     } else if (key === "name") {
-      expressions.push(match("states[entity].name", value as Selection))
+      expressions.push(match("entity_name(entity, fallback=true)", value as Selection))
     } else if (key === "attributes") {
       for (const [attribute, pattern] of Object.entries(value as Record<string, Selection>)) {
         expressions.push(match(`state_attr(entity, ${literal(attribute)})`, pattern))
@@ -197,7 +197,7 @@ function sortValue(sort: Sort, group: number): string {
     case "entity_id":
       return "entity"
     case "name":
-      return "states[entity].name"
+      return "entity_name(entity, fallback=true)"
     case "state":
       return "states(entity)"
     case "last_changed":
