@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { normalizeConfig, normalizeMatches } from "../src/query.ts"
+import { fieldValue, normalizeConfig, normalizeMatches } from "../src/query.ts"
 
 const query = (include, extra = {}) => normalizeConfig({ include, ...extra }).query.template
 
@@ -83,6 +83,14 @@ test("sort strings and mixed lists compile identically to their expanded forms",
     "state",
     "last_changed",
     "last_updated",
+    "integration",
+    "area",
+    "floor",
+    "device",
+    "label",
+    "domain",
+    "device_class",
+    "hidden",
     "attr.battery",
     "attr.some.integration_key",
   ]) {
@@ -109,6 +117,59 @@ test("sort strings and mixed lists compile identically to their expanded forms",
   ]) {
     assert.throws(() => normalizeConfig({ include, sort }))
   }
+})
+
+test("fieldValue supplies every sortable filter field and optional by defaults to name", () => {
+  const fields = [
+    "area",
+    "floor",
+    "device",
+    "label",
+    "domain",
+    "entity_id",
+    "device_class",
+    "hidden",
+    "state",
+    "name",
+    "last_changed",
+    "last_updated",
+    "integration",
+    "attr.battery",
+  ]
+  for (const field of fields) {
+    assert.ok(query({ domain: "sensor" }, { sort: field }).includes(fieldValue(field, 0)), field)
+  }
+  assert.equal(fieldValue("include", 12), "12")
+  assert.equal(query({}, { sort: {} }), query({}, { sort: "name" }))
+  assert.equal(
+    query({}, { sort: { reverse: true } }),
+    query({}, { sort: { by: "name", reverse: true } })
+  )
+  for (const field of ["all", "any", "not", "category", "entity_category", "attr."]) {
+    assert.throws(() => normalizeConfig({ include: {}, sort: field }), /Unknown sort.by/)
+  }
+})
+
+test("integration candidates and predicates share one hoisted membership lookup", () => {
+  const template = query(
+    { integration: "mqtt" },
+    { exclude: { integration: "mqtt", hidden: true } }
+  )
+  assert.equal(template.match(/integration_entities\("mqtt"\)/g).length, 1)
+  assert.doesNotMatch(template, /states \| map/)
+  assert.match(template, /for entity in \(ag_members_0\)/)
+  assert.doesNotMatch(query({ not: { integration: "mqtt" } }), /for entity in \(ag_members_0\)/)
+})
+
+test("timestamp rules use the same Unix timestamp expressions as sorting", () => {
+  for (const field of ["last_changed", "last_updated"]) {
+    assert.ok(query({ [field]: "> 1767225600" }).includes(fieldValue(field, 0)))
+    assert.throws(() => normalizeConfig({ include: { [field]: {} } }))
+  }
+  for (const integration of [null, 3, [], [null], {}]) {
+    assert.throws(() => normalizeConfig({ include: { integration } }))
+  }
+  assert.throws(() => normalizeConfig({ include: { category: "diagnostic" } }), /Unknown filter/)
 })
 
 test("attribute filter names are literal, quoted, and non-empty", () => {

@@ -67,15 +67,39 @@ for case in payload:
         state = states.values.get(entity)
         return state.name if state else None
 
+    def entity_device(entity):
+        entry = case.get("registry", {}).get(entity, {})
+        return case.get("devices", {}).get(entry.get("device_id"), {})
+
+    def entity_area(entity):
+        entry = case.get("registry", {}).get(entity, {})
+        area_id = entry.get("area_id") or entity_device(entity).get("area_id")
+        return case.get("areas", {}).get(area_id, {})
+
+    def config_entry_attr(entry_id, attribute):
+        if not isinstance(entry_id, str):
+            raise ValueError("Must provide a config entry ID")
+        return case.get("config_entries", {}).get(entry_id, {}).get(attribute)
+
+    def label_name(label):
+        return case.get("labels", {}).get(label, {}).get("name")
+
+    env.filters["label_name"] = label_name
     env.globals.update(
         entity_name=entity_name,
+        area_name=lambda entity: entity_area(entity).get("name"),
+        floor_name=lambda entity: case.get("floors", {}).get(entity_area(entity).get("floor_id"), {}).get("name"),
+        device_name=lambda entity: entity_device(entity).get("name_by_user") or entity_device(entity).get("name"),
+        labels=lambda entity: case.get("registry", {}).get(entity, {}).get("labels", []),
+        config_entry_id=lambda entity: case.get("registry", {}).get(entity, {}).get("config_entry_id"),
+        config_entry_attr=config_entry_attr,
         states=states,
         state_attr=lambda entity, attribute: states.values[entity].attributes.get(attribute),
         is_number=is_number,
         is_hidden_entity=lambda entity: case.get("registry", {}).get(entity, {}).get("hidden_by") is not None,
         as_timestamp=lambda value: datetime.fromisoformat(value).timestamp(),
     )
-    for kind in ["area", "floor", "device", "label"]:
+    for kind in ["area", "floor", "device", "label", "integration"]:
         def entities(value, kind=kind):
             key = kind + ":" + value
             calls[key] = calls.get(key, 0) + 1

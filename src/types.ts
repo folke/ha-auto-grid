@@ -38,23 +38,22 @@ export interface Filter {
   hidden?: boolean
   state?: Selection
   name?: Selection
+  last_changed?: Selection
+  last_updated?: Selection
+  integration?: string | string[]
   [attribute: `attr.${string}`]: Selection
   all?: Filter[]
   any?: Filter[]
   not?: Filter | Filter[]
 }
 
+export type FilterField = keyof Omit<Filter, "all" | "any" | "not">
 export type Include = Filter & { card?: Partial<CardConfig> }
 
+export type SortField = "include" | FilterField
+
 export interface Sort {
-  by:
-    | "include"
-    | "entity_id"
-    | "name"
-    | "state"
-    | "last_changed"
-    | "last_updated"
-    | `attr.${string}`
+  by?: SortField
   numeric?: boolean
   reverse?: boolean
 }
@@ -68,7 +67,7 @@ export interface AutoGridConfig {
   card?: Partial<CardConfig>
   include: Include | Include[]
   exclude?: Filter | Filter[]
-  sort?: Sort | Sort["by"] | (Sort | Sort["by"])[]
+  sort?: Sort | SortField | (Sort | SortField)[]
   limit?: number
   [key: string]: unknown
 }

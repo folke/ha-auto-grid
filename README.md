@@ -123,6 +123,9 @@ one Jinja query and subscribed through HA's `render_template` WebSocket API.
 | `hidden`       | Boolean; whether HA's entity registry marks the entity as hidden     |
 | `state`        | Exact value, wildcard, `/regex/`, numeric comparison, or a list      |
 | `name`         | Entity's own name, with device fallback and the same matching syntax |
+| `last_changed` | Unix timestamp in seconds; numeric value/comparison or a list        |
+| `last_updated` | Unix timestamp in seconds; numeric value/comparison or a list        |
+| `integration`  | Integration domain or config entry title, or a list                  |
 | `attr.<name>`  | Match a literal entity attribute using the same matching syntax      |
 | `all`          | List of filters, all must match                                      |
 | `any`          | List of filters, at least one must match                             |
@@ -139,6 +142,24 @@ registry entry. Omit the rule to ignore hidden status (the default). It compiles
 HA's `is_hidden_entity()` helper, not a state attribute or dashboard visibility check.
 Like other registry metadata, immediate reevaluation after registry-only edits depends
 on HA's template tracking.
+
+`integration` uses HA's `integration_entities()` helper, including its config-entry
+title matching semantics. It also narrows the initial candidate list, so an
+integration-scoped query does not scan every state. Names are exact, not regexes.
+
+`last_changed` and `last_updated` read the state's timestamps as Unix seconds:
+
+```yaml
+include:
+  integration: mqtt
+  last_updated: ">= 1767225600" # January 1, 2026, UTC
+sort:
+  - by: last_updated
+    reverse: true
+```
+
+These are absolute timestamps, not ages; relative-time expressions such as
+`"< 5 m ago"` are not supported. Registry `entity_category`/`category` remains deferred.
 
 To exclude hidden entities from every include group:
 
@@ -237,11 +258,24 @@ sort:
     reverse: true
 ```
 
-Supported `by` values: `include` (winning include group's index), `entity_id`, `name`,
-`state`, `last_changed`, `last_updated`, and `attr.<name>` (for example, `attr.battery`).
-Use an object to set independent `numeric` and `reverse` flags for each sort. Include and
-timestamp sorts are numeric automatically. String sorts are case-insensitive.
-Missing/non-numeric values in numeric sorts go last in either direction.
+Every filter field is also sortable: `area`, `floor`, `device`, `label`, `domain`,
+`entity_id`, `device_class`, `hidden`, `state`, `name`, `last_changed`, `last_updated`,
+`integration`, and `attr.<name>`. `include` additionally sorts by the winning include
+group's index. Boolean operators `all`/`any`/`not` are not fields and cannot be sorted.
+
+Use an object to set independent `numeric` and `reverse` flags for each sort. If `by`
+is omitted from an object, it defaults to `name` (for example, `sort: { reverse: true }`).
+Include, hidden, and timestamp sorts are numeric automatically; hidden sorts visible
+entities first unless reversed. String sorts are case-insensitive. Missing/non-numeric
+values in numeric sorts go last in either direction.
+
+Area/floor/device sorting uses resolved display names rather than IDs. Label sorting
+uses the canonical, alphabetically sorted list of the entity's assigned label names,
+compared as text; entities without labels use an empty value. Integration sorting uses
+the config entry's domain, not its title. Entities without a config entry (such as
+some YAML-defined entities) have no integration sort value, even though HA can still
+select them using `integration_entities()`. Missing textual values compare as empty
+strings.
 
 Whenever sorting is enabled, entity ID is the final ascending tie-breaker for
 predictable ordering. **`sort: []` disables all sorting**, including that fallback,
@@ -300,7 +334,7 @@ implement per-card column/row spans. Grid spacing can be customized with the
 
 ### Backend trade-offs
 
-The compiler narrows candidates to an area/device/label/floor, explicit IDs, or domains
+The compiler narrows candidates to an area/device/label/floor/integration, explicit IDs, or domains
 where it can do so safely. Membership helpers are evaluated once per template render,
 not once per entity. OR/NOT-only queries may require a full state scan.
 

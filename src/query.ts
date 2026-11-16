@@ -2,17 +2,19 @@ import type {
   AutoGridConfig,
   CardConfig,
   Filter,
+  FilterField,
   GridConfig,
   Include,
   Pattern,
   QueryMatch,
   Selection,
   Sort,
+  SortField,
 } from "./types.ts"
 
 const entityId = /^[a-z0-9_]+\.[a-z0-9_]+$/
 const domain = /^[a-z0-9_]+$/
-const filterKeys = new Set([
+const fieldKeys = new Set<FilterField>([
   "area",
   "floor",
   "device",
@@ -23,10 +25,19 @@ const filterKeys = new Set([
   "hidden",
   "state",
   "name",
-  "all",
-  "any",
-  "not",
+  "last_changed",
+  "last_updated",
+  "integration",
 ])
+const booleanKeys = new Set(["all", "any", "not"])
+type NormalizedSort = Sort & { by: SortField }
+
+function isField(field: unknown): field is FilterField {
+  return (
+    typeof field === "string" &&
+    (fieldKeys.has(field as FilterField) || (field.startsWith("attr.") && field.length > 5))
+  )
+}
 const sortKeys = new Set(["by", "numeric", "reverse"])
 
 function object(value: unknown, name: string): asserts value is Record<string, unknown> {
@@ -106,10 +117,19 @@ function validateFilter(filter: Filter, depth = 0): void {
   object(filter, "filter")
   if (depth > 20) throw new Error("Filters may nest at most 20 levels")
   for (const [key, value] of Object.entries(filter)) {
-    if (!filterKeys.has(key) && !key.startsWith("attr."))
-      throw new Error(`Unknown filter rule: ${key}`)
-    if (key === "attr.") throw new Error("attr. requires a non-empty attribute name")
-    if (["area", "floor", "device", "label", "domain", "entity_id", "device_class"].includes(key)) {
+    if (!isField(key) && !booleanKeys.has(key)) throw new Error(`Unknown filter rule: ${key}`)
+    if (
+      [
+        "area",
+        "floor",
+        "device",
+        "label",
+        "domain",
+        "entity_id",
+        "device_class",
+        "integration",
+      ].includes(key)
+    ) {
       const values = strings(value, key)
       if (key === "domain" && values.some((v) => !domain.test(v))) {
         throw new Error("domain must contain valid domain names, not patterns")
@@ -131,24 +151,15 @@ function validateFilter(filter: Filter, depth = 0): void {
 function predicate(filter: Filter, sets: Map<string, string>): string {
   const expressions: string[] = []
   for (const [key, value] of Object.entries(filter)) {
-    if (["area", "floor", "device", "label"].includes(key)) {
+    if (["area", "floor", "device", "label", "integration"].includes(key)) {
       const source = membership(key, strings(value, key))
       if (!sets.has(source)) sets.set(source, `ag_members_${sets.size}`)
       expressions.push(`entity in ${sets.get(source)}`)
     } else if (key === "domain") {
-      expressions.push(`entity.split('.')[0] in ${JSON.stringify(strings(value, key))}`)
-    } else if (key === "entity_id") {
-      expressions.push(match("entity", value as Selection))
-    } else if (key === "device_class") {
-      expressions.push(match(`state_attr(entity, ${literal("device_class")})`, value as Selection))
+      expressions.push(`${fieldValue("domain", 0)} in ${JSON.stringify(strings(value, key))}`)
     } else if (key === "hidden") {
-      expressions.push(value ? "is_hidden_entity(entity)" : "not is_hidden_entity(entity)")
-    } else if (key === "state") {
-      expressions.push(match("states(entity)", value as Selection))
-    } else if (key === "name") {
-      expressions.push(match("entity_name(entity, fallback=true)", value as Selection))
-    } else if (key.startsWith("attr.")) {
-      expressions.push(match(`state_attr(entity, ${literal(key.slice(5))})`, value as Selection))
+      const target = fieldValue(key, 0)
+      expressions.push(value ? target : `not ${target}`)
     } else if (key === "all" || key === "any") {
       expressions.push(
         join(
@@ -164,6 +175,8 @@ function predicate(filter: Filter, sets: Map<string, string>): string {
           "or"
         )}`
       )
+    } else {
+      expressions.push(match(fieldValue(key as FilterField, 0), value as Selection))
     }
   }
   return join(expressions, "and")
@@ -171,7 +184,7 @@ function predicate(filter: Filter, sets: Map<string, string>): string {
 
 // A restriction in an AND branch is a safe candidate set. Restrictions under OR/NOT aren't.
 function candidates(filter: Filter): string {
-  for (const key of ["area", "device", "label", "floor"] as const) {
+  for (const key of ["area", "device", "label", "floor", "integration"] as const) {
     if (filter[key] !== undefined) return membership(key, strings(filter[key], key))
   }
   if (filter.entity_id !== undefined) {
@@ -190,10 +203,26 @@ function candidates(filter: Filter): string {
   return "states | map(attribute='entity_id') | list"
 }
 
-function sortValue(sort: Sort, group: number): string {
-  switch (sort.by) {
+export function fieldValue(field: SortField, include: number): string {
+  switch (field) {
     case "include":
-      return String(group)
+      return String(include)
+    case "area":
+      return "area_name(entity)"
+    case "floor":
+      return "floor_name(entity)"
+    case "device":
+      return "device_name(entity)"
+    case "label":
+      return "(labels(entity) | map('label_name') | select('string') | sort | list)"
+    case "domain":
+      return "entity.split('.')[0]"
+    case "device_class":
+      return `state_attr(entity, ${literal("device_class")})`
+    case "hidden":
+      return "is_hidden_entity(entity)"
+    case "integration":
+      return "(config_entry_attr(config_entry_id(entity), 'domain') if config_entry_id(entity) is not none else none)"
     case "entity_id":
       return "entity"
     case "name":
@@ -205,18 +234,17 @@ function sortValue(sort: Sort, group: number): string {
     case "last_updated":
       return "as_timestamp(states[entity].last_updated)"
     default:
-      return `state_attr(entity, ${literal(sort.by.slice(5))})`
+      if (field.startsWith("attr.") && field.length > 5) {
+        return `state_attr(entity, ${literal(field.slice(5))})`
+      }
+      throw new Error(`Unknown field: ${field}`)
   }
 }
 
 function validateSort(sort: Sort): void {
   object(sort, "sort")
   if (Object.keys(sort).some((k) => !sortKeys.has(k))) throw new Error("Unknown sort option")
-  if (
-    typeof sort.by !== "string" ||
-    (!["include", "entity_id", "name", "state", "last_changed", "last_updated"].includes(sort.by) &&
-      !(sort.by.startsWith("attr.") && sort.by.length > 5))
-  ) {
+  if (sort.by !== undefined && sort.by !== "include" && !isField(sort.by)) {
     throw new Error("Unknown sort.by")
   }
   for (const key of ["numeric", "reverse"] as const) {
@@ -225,16 +253,18 @@ function validateSort(sort: Sort): void {
   }
 }
 
-const defaultSort: Sort[] = [{ by: "include" }, { by: "name" }]
+const defaultSort: NormalizedSort[] = [{ by: "include" }, { by: "name" }]
 
-function numericSort(sort: Sort): boolean {
-  return sort.numeric === true || ["include", "last_changed", "last_updated"].includes(sort.by)
+function numericSort(sort: NormalizedSort): boolean {
+  return (
+    sort.numeric === true || ["include", "hidden", "last_changed", "last_updated"].includes(sort.by)
+  )
 }
 
 function compileQuery(
   includes: Filter[],
   excludes: Filter[],
-  sorts: Sort[],
+  sorts: NormalizedSort[],
   limit?: number
 ): string {
   const sets = new Map<string, string>()
@@ -246,7 +276,7 @@ function compileQuery(
     const condition = predicate(filter, sets)
     const source = candidates(filter)
     const values = sorts.map((sort, index) => {
-      const value = sortValue(sort, group)
+      const value = fieldValue(sort.by, group)
       const prepared = numericSort(sort)
         ? `(${value} | float(none))`
         : `(${value} | default('', true) | string)`
@@ -378,7 +408,7 @@ export function normalizeConfig(input: AutoGridConfig): GridConfig {
   const normalizedSorts = sorts.map((sort) => {
     const normalized = typeof sort === "string" ? { by: sort } : sort
     validateSort(normalized)
-    return normalized
+    return { ...normalized, by: normalized.by ?? "name" }
   })
   return {
     title: config.title,
