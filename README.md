@@ -437,22 +437,43 @@ model rather than the legacy/composed `friendly_name` attribute. It does not eva
 
 ## Options
 
-| Option       | Default          | Description                                                              |
-| ------------ | ---------------- | ------------------------------------------------------------------------ |
-| `include`    | Required         | A selection filter or list; groups may override `card`                   |
-| `exclude`    | —                | A global exclusion filter or list                                        |
-| `card`       | `{ type: tile }` | Shared child-card configuration; `entity` is reserved                    |
-| `title`      | —                | Optional text heading above the grid                                     |
-| `columns`    | `2`              | Positive integer; fixed equal-width columns                              |
-| `square`     | `false`          | Square cells, like the native grid card                                  |
-| `show_empty` | `false`          | Show an empty-state message instead of hiding the grid                   |
-| `group`      | `false`          | Boolean, field name, or `{ by, title }` for visual grouping              |
-| `sort`       | `name`           | Sort string/object or mixed priority-ordered list; `[]` disables sorting |
-| `limit`      | —                | Maximum number of results, applied last                                  |
+| Option       | Default          | Description                                                               |
+| ------------ | ---------------- | ------------------------------------------------------------------------- |
+| `include`    | Required         | A selection filter or list; groups may override `card`                    |
+| `exclude`    | —                | A global exclusion filter or list                                         |
+| `card`       | `{ type: tile }` | Shared child-card configuration; `entity` is reserved                     |
+| `title`      | —                | Optional text heading above the grid                                      |
+| `columns`    | `2`              | Positive integer for fixed columns, or `auto` for a single horizontal row |
+| `square`     | `false`          | Square cells, like the native grid card                                   |
+| `show_empty` | `false`          | Show an empty-state message instead of hiding the grid                    |
+| `group`      | `false`          | Boolean, field name, or `{ by, title }` for visual grouping               |
+| `sort`       | `name`           | Sort string/object or mixed priority-ordered list; `[]` disables sorting  |
+| `limit`      | —                | Maximum number of results, applied last                                   |
+
+### Grid and stack layouts
+
+- `columns: 1`: a vertical stack.
+- `columns: 2` (the default): a two-column grid, wrapping into additional rows.
+- `columns: auto`: one equal-width column per rendered card, like a horizontal stack.
+
+```yaml
+type: custom:auto-grid
+columns: auto
+include:
+  area: office
+  type: light
+```
+
+`auto` does **not** mean responsive wrapping or auto-fill: cards share a single row,
+even on narrow screens. Each visual group calculates its own column count after
+filtering and limiting. Membership changes update that count; changing between auto
+and fixed columns preserves child cards and the backend subscription. Use a scoped
+selection or `limit` to avoid an overly crowded horizontal row. `square` still applies.
 
 This is an equal-column grid, not the full Sections layout engine. It does not
-implement per-card column/row spans. Grid spacing can be customized with the
-`--auto-grid-gap` CSS property; otherwise it uses HA's `--grid-card-gap` or `8px`.
+implement per-card column/row spans or minimum-width-based wrapping. Grid spacing can
+be customized with the `--auto-grid-gap` CSS property; otherwise it uses HA's
+`--grid-card-gap` or `8px`.
 
 ## Performance and lifecycle
 

@@ -39,7 +39,8 @@ export class AutoGrid extends LitElement {
 
   setConfig(config: AutoGridConfig): void {
     this.config = normalizeConfig(config)
-    this.style.setProperty("--auto-grid-columns", String(this.config.columns))
+    if (this.config.columns === "auto") this.style.removeProperty("--auto-grid-columns")
+    else this.style.setProperty("--auto-grid-columns", String(this.config.columns))
     this.toggleAttribute("square", this.config.square)
     this.grid.configure(this.config)
     this.gridChanged()
@@ -94,9 +95,11 @@ export class AutoGrid extends LitElement {
   }
 
   async getCardSize(): Promise<number> {
-    const columns = this.config?.columns ?? 2
+    const configuredColumns = this.config?.columns ?? 2
+    const cards = this.grid.cards
+    const sections = this.grid.sections ?? [{ title: "", cards }]
     const sizes = await Promise.all(
-      this.grid.cards.map(async ({ card }) => {
+      cards.map(async ({ card }) => {
         try {
           return (await card.getCardSize?.()) ?? 1
         } catch {
@@ -104,10 +107,11 @@ export class AutoGrid extends LitElement {
         }
       })
     )
-    const byEntity = new Map(this.grid.cards.map(({ entity }, i) => [entity, sizes[i]]))
+    const byEntity = new Map(cards.map(({ entity }, i) => [entity, sizes[i]]))
     let size = 0
-    const sections = this.grid.sections ?? [{ title: "", cards: this.grid.cards }]
     for (const section of sections) {
+      const columns =
+        configuredColumns === "auto" ? Math.max(1, section.cards.length) : configuredColumns
       if (sections.length > 1 && section.title) size++
       const heights = section.cards.map(({ entity }) => byEntity.get(entity) ?? 1)
       for (let i = 0; i < heights.length; i += columns)
@@ -166,7 +170,10 @@ export class AutoGrid extends LitElement {
       (section) =>
         html` <section class="section">
           ${sections.length > 1 && section.title ? html`<h2 class="group-header">${section.title}</h2>` : nothing}
-          <div class="grid">
+          <div
+            class="grid"
+            style=${this.config?.columns === "auto" ? `--auto-grid-columns: ${section.cards.length}` : nothing}
+          >
             ${repeat(
               section.cards,
               ({ entity }) => entity,

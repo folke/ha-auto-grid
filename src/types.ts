@@ -73,7 +73,7 @@ export interface Sort {
 export interface AutoGridConfig {
   type?: string
   title?: string
-  columns?: number
+  columns?: number | "auto"
   square?: boolean
   show_empty?: boolean
   card?: Partial<CardConfig>
@@ -118,7 +118,7 @@ export interface CompiledQuery {
 
 export interface GridConfig {
   title?: string
-  columns: number
+  columns: number | "auto"
   square: boolean
   show_empty: boolean
   card: CardConfig

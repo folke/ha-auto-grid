@@ -20,6 +20,18 @@ test("defaults to two columns of tiles and name sorting without mutating input",
   assert.deepEqual(input, original)
 })
 
+test("columns accepts positive integers or auto without changing backend queries", () => {
+  const base = normalizeConfig({ include: { type: "light" } })
+  for (const columns of [1, 2, 6, "auto"]) {
+    const config = normalizeConfig({ include: { type: "light" }, columns })
+    assert.equal(config.columns, columns)
+    assert.deepEqual(config.query, base.query)
+  }
+  for (const columns of [0, -1, 1.5, "0", "2", "fill", "AUTO", "", null, false, [], {}, Infinity]) {
+    assert.throws(() => normalizeConfig({ include: {}, columns }), /columns must be/)
+  }
+})
+
 test("title is optional presentation configuration and does not change the query", () => {
   const base = normalizeConfig({ include: { domain: "light" } })
   assert.equal(base.title, undefined)

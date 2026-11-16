@@ -89,6 +89,45 @@
         await tick()
         assert(tiles()[0] === b && tiles()[1] === a, "keyed rendering preserves card identity")
         assert(created === 3, "only the added card was created")
+        grid.setConfig({ ...config, columns: "auto" })
+        await tick()
+        const columnCounts = () =>
+          [...grid.shadowRoot.querySelectorAll(".grid")].map(
+            (el) => getComputedStyle(el).gridTemplateColumns.split(" ").length
+          )
+        assert(columnCounts()[0] === 3, "auto gives every card its own column")
+        assert((await grid.getCardSize()) === 1, "auto sizing is one row")
+        b.getCardSize = () => 3
+        assert((await grid.getCardSize()) === 3, "auto sizing uses the tallest child")
+        delete b.getCardSize
+        grid.style.width = "120px"
+        await tick()
+        const autoCells = [...grid.shadowRoot.querySelectorAll(".cell")]
+        assert(
+          new Set(autoCells.map((cell) => cell.offsetTop)).size === 1,
+          "auto never wraps on narrow screens"
+        )
+        assert(
+          Math.max(...autoCells.map((cell) => cell.getBoundingClientRect().width)) -
+            Math.min(...autoCells.map((cell) => cell.getBoundingClientRect().width)) <
+            1,
+          "auto columns have equal widths"
+        )
+        grid.style.removeProperty("width")
+        grid.setConfig({ ...config, columns: 1 })
+        await tick()
+        assert(
+          columnCounts()[0] === 1 && (await grid.getCardSize()) === 3,
+          "switching to one column restores vertical layout"
+        )
+        assert(
+          !grid.shadowRoot.querySelector(".grid").hasAttribute("style"),
+          "fixed columns remove the per-grid auto override"
+        )
+        assert(
+          tiles()[0] === b && tiles()[1] === a && created === 3 && subscriptions.length === 1,
+          "auto/fixed layout switches preserve cards and the query"
+        )
         grid.setConfig({ ...config, columns: 3, title: "Pool lights" })
         await tick()
         assert(
@@ -225,6 +264,35 @@
         assert(
           (await grid.getCardSize()) === 4,
           "group headers and incomplete rows contribute to size"
+        )
+        grid.setConfig({ ...config, group: "area", columns: "auto" })
+        emitSections([
+          section("Pool", "Pool", ["light.a", "light.c"]),
+          section("Other", "Other", ["light.b"]),
+        ])
+        await tick()
+        assert(
+          columnCounts().join() === "2,1",
+          "auto columns are calculated independently per group"
+        )
+        assert(
+          (await grid.getCardSize()) === 4,
+          "grouped auto sizing includes headings and one row per group"
+        )
+        emitSections([section("Other", "Other", ["light.a", "light.c", "light.b"])])
+        await tick()
+        assert(
+          columnCounts()[0] === 3 && (await grid.getCardSize()) === 1,
+          "auto column counts follow group membership"
+        )
+        emitSections([section("Pool", "Pool", ["light.a"]), section("Other", "Other", ["light.b"])])
+        await tick()
+        assert(columnCounts().join() === "1,1", "shrinking groups update their auto column counts")
+        grid.setConfig({ ...config, group: "area" })
+        await tick()
+        assert(
+          tiles()[0] === retainedA && tiles()[1] === tile && subscriptions.length === 5,
+          "grouped layout changes preserve retained cards and subscriptions"
         )
         const createdBeforeMove = created
         emitSections([
