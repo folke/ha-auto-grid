@@ -111,6 +111,19 @@ test("validates backend matches and defensively preserves the first duplicate", 
   }
 })
 
+test("hidden is a boolean rule compiled directly to HA's registry helper", () => {
+  assert.match(query({ domain: "light", hidden: true }), /and is_hidden_entity\(entity\)/)
+  assert.match(query({ domain: "light", hidden: false }), /and not is_hidden_entity\(entity\)/)
+  assert.doesNotMatch(query({ domain: "light" }), /is_hidden_entity/)
+  for (const hidden of ["false", "user", null, 0, [], [true], {}]) {
+    assert.throws(() => normalizeConfig({ include: { hidden } }), /hidden must be a boolean/)
+    assert.throws(
+      () => normalizeConfig({ include: {}, exclude: { not: { hidden } } }),
+      /hidden must be a boolean/
+    )
+  }
+})
+
 test("invalid configuration is rejected early", () => {
   for (const config of [
     {},

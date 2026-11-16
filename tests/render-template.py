@@ -59,6 +59,7 @@ for case in payload:
         states=states,
         state_attr=lambda entity, attribute: states.values[entity].attributes.get(attribute),
         is_number=is_number,
+        is_hidden_entity=lambda entity: case.get("registry", {}).get(entity, {}).get("hidden_by") is not None,
         as_timestamp=lambda value: datetime.fromisoformat(value).timestamp(),
     )
     for kind in ["area", "floor", "device", "label"]:

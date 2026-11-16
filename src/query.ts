@@ -20,6 +20,7 @@ const filterKeys = new Set([
   "domain",
   "entity_id",
   "device_class",
+  "hidden",
   "state",
   "name",
   "attributes",
@@ -112,6 +113,8 @@ function validateFilter(filter: Filter, depth = 0): void {
       if (key === "domain" && values.some((v) => !domain.test(v))) {
         throw new Error("domain must contain valid domain names, not patterns")
       }
+    } else if (key === "hidden") {
+      if (typeof value !== "boolean") throw new Error("hidden must be a boolean")
     } else if (key === "all" || key === "any") {
       if (!Array.isArray(value)) throw new Error(`${key} must be a list of filters`)
       value.forEach((v) => validateFilter(v, depth + 1))
@@ -142,6 +145,8 @@ function predicate(filter: Filter, sets: Map<string, string>): string {
       expressions.push(match("entity", value as Selection))
     } else if (key === "device_class") {
       expressions.push(match("state_attr(entity, 'device_class')", value as Selection))
+    } else if (key === "hidden") {
+      expressions.push(value ? "is_hidden_entity(entity)" : "not is_hidden_entity(entity)")
     } else if (key === "state") {
       expressions.push(match("states(entity)", value as Selection))
     } else if (key === "name") {

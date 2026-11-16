@@ -117,6 +117,7 @@ one Jinja query and subscribed through HA's `render_template` WebSocket API.
 | `domain`       | Exact domain name, or a list, e.g. `light`                       |
 | `entity_id`    | Exact ID, wildcard, `/regex/`, or a list                         |
 | `device_class` | Shorthand for matching `attributes.device_class`; string or list |
+| `hidden`       | Boolean; whether HA's entity registry marks the entity as hidden |
 | `state`        | Exact value, wildcard, `/regex/`, numeric comparison, or a list  |
 | `name`         | State object's friendly name, with the same matching syntax      |
 | `attributes`   | Map of attribute names to matching values                        |
@@ -128,6 +129,20 @@ Area/floor/device/label membership uses HA's corresponding `*_entities()` helper
 semantics. An area includes entities assigned through a device. `device_class` and
 an explicit `attributes.device_class` are additional AND constraints: contradictory
 values match nothing; neither overrides the other.
+
+`hidden: true` matches entities hidden by either the user or an integration.
+`hidden: false` matches entities that are not hidden, including entities without a
+registry entry. Omit the rule to ignore hidden status (the default). It compiles to
+HA's `is_hidden_entity()` helper, not a state attribute or dashboard visibility check.
+Like other registry metadata, immediate reevaluation after registry-only edits depends
+on HA's template tracking.
+
+To exclude hidden entities from every include group:
+
+```yaml
+exclude:
+  hidden: true
+```
 
 Strings match exactly unless they contain `*` or are delimited with `/` for a Python
 regular expression. Globs are anchored, `*` matches any sequence, and other characters

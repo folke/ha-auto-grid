@@ -329,3 +329,63 @@ test(
     )
   }
 )
+
+test(
+  "hidden filtering uses registry flags in includes, exclusions, and nested rules",
+  {
+    skip: python.status !== 0 ? "Optional check requires Python 3 with jinja2 installed" : false,
+  },
+  () => {
+    const states = {
+      "light.user_hidden": { state: "on" },
+      "light.integration_hidden": { state: "off" },
+      "light.visible": { state: "on" },
+      "light.unregistered": { state: "off", attributes: { hidden: true } },
+    }
+    const registry = {
+      "light.user_hidden": { hidden_by: "user" },
+      "light.integration_hidden": { hidden_by: "integration" },
+      "light.visible": { hidden_by: null },
+    }
+    const hidden = ["light.user_hidden", "light.integration_hidden"]
+    const visible = ["light.visible", "light.unregistered"]
+    const cases = [
+      [{ include: { domain: "light", hidden: true } }, hidden],
+      [{ include: { domain: "light", hidden: false } }, visible],
+      [{ include: { domain: "light" }, exclude: { hidden: true } }, visible],
+      [{ include: { domain: "light" }, exclude: { hidden: false } }, hidden],
+      [{ include: { domain: "light", not: { hidden: true } } }, visible],
+      [{ include: { domain: "light", all: [{ hidden: true }, { state: "on" }] } }, [hidden[0]]],
+      [
+        { include: { domain: "light", any: [{ hidden: true }, { state: "off" }] } },
+        [...hidden, visible[1]],
+      ],
+      [{ include: { domain: "light" } }, [...hidden, ...visible]],
+      [
+        { include: [{ domain: "light", hidden: true }, { domain: "light" }] },
+        [...hidden, ...visible],
+      ],
+    ]
+    const payload = cases.map(([config]) => ({
+      template: normalizeConfig({ ...config, sort: [] }).query.template,
+      states,
+      registry,
+    }))
+    const output = spawnSync(
+      "python3",
+      [fileURLToPath(new URL("./render-template.py", import.meta.url))],
+      {
+        input: JSON.stringify(payload),
+        encoding: "utf8",
+      }
+    )
+    assert.equal(output.status, 0, output.stderr)
+    JSON.parse(output.stdout).forEach((actual, i) => {
+      assert.deepEqual(
+        actual.result.map(({ entity }) => entity),
+        cases[i][1],
+        JSON.stringify(cases[i][0])
+      )
+    })
+  }
+)

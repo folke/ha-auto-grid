@@ -35,6 +35,7 @@ export interface Filter {
   domain?: string | string[]
   entity_id?: string | string[]
   device_class?: string | string[] // short-hand for attributes.device_class
+  hidden?: boolean
   state?: Selection
   name?: Selection
   attributes?: Record<string, Selection>
