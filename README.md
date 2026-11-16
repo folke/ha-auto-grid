@@ -86,8 +86,7 @@ include:
       features:
         - type: light-brightness
   - area: pool
-    domain: binary_sensor
-    device_class: problem
+    type: binary_sensor/problem
 exclude:
   - entity_id: "*_diagnostic"
   - state: unavailable
@@ -121,8 +120,7 @@ include:
   - group: Lights
     domain: light
   - group: Problems
-    domain: binary_sensor
-    device_class: problem
+    type: binary_sensor/problem
 group: true
 ```
 
@@ -174,7 +172,11 @@ Available variables:
 
 - `group`: the literal grouping value.
 - `group_name`: its default display value. Usually the same as `group`, but integration
-  domains use manifest names (`mqtt` → `MQTT`). Missing values use an empty display value.
+  domains use manifest names (`mqtt` → `MQTT`) and entity types use their device class
+  (`sensor/battery` → `battery`) or domain when no class exists. Missing values use an
+  empty display value.
+- `group_count`: the total number of resulting groups after filtering, sorting, and
+  the global limit (not the number of entities in this particular group).
 - `entity_id`: the first entity in the group after sorting and limiting.
 - `entity`: that entity's state object; use `entity_name(entity_id, fallback=true)` for
   modern entity naming rather than its legacy `.name` property.
@@ -197,8 +199,11 @@ Lookup failures fall back to the raw domain and do not prevent the grid from loa
 Custom templates can use `group` for the domain and `group_name` for the friendly name.
 
 Missing values form a group rather than dropping entities. An empty title omits its
-heading but keeps a separate grid. Empty groups never render. Top-level `title` and
-`show_empty` retain their usual behavior for the whole card.
+heading but keeps a separate grid. Empty groups never render. If only one group
+remains, its heading is automatically hidden, including custom headings; the grid
+keeps its cards and reserves no header height. Titles are still evaluated, so a
+second group appearing restores headings without a new subscription. The top-level
+`title` stays visible and `show_empty` retains its usual behavior for the whole card.
 
 ## Filter rules
 
@@ -213,7 +218,7 @@ one Jinja query and subscribed through HA's `render_template` WebSocket API.
 | `label`        | Label ID/name, or a list                                             |
 | `domain`       | Exact domain name, or a list, e.g. `light`                           |
 | `entity_id`    | Exact ID, wildcard, `/regex/`, or a list                             |
-| `device_class` | Shorthand for matching `attr.device_class`; string or list           |
+| `type`         | HA-style entity type: domain or domain/device_class, or a list       |
 | `hidden`       | Boolean; whether HA's entity registry marks the entity as hidden     |
 | `state`        | Exact value, wildcard, `/regex/`, numeric comparison, or a list      |
 | `name`         | Entity's own name, with device fallback and the same matching syntax |
@@ -226,9 +231,35 @@ one Jinja query and subscribed through HA's `render_template` WebSocket API.
 | `not`          | A filter that must not match, or a list where none may match         |
 
 Area/floor/device/label membership uses HA's corresponding `*_entities()` helper
-semantics. An area includes entities assigned through a device. `device_class` and
-an explicit `attr.device_class` are additional AND constraints: contradictory
-values match nothing; neither overrides the other.
+semantics. An area includes entities assigned through a device.
+
+`type` mirrors HA's entity-type selection: a bare domain matches every entity in that
+domain, even when it has a device class. A qualified type matches both parts exactly:
+
+```yaml
+include:
+  area: office
+  type:
+    - light
+    - binary_sensor/battery
+group: type
+```
+
+- `type: sensor` matches all sensors, including battery and temperature sensors.
+- `type: sensor/battery` matches only battery sensors.
+- `type` values are exact, not globs or regexes. Candidate selection is restricted
+  to the listed domains without scanning all states.
+- Type sorting/grouping uses the most specific value: `sensor/battery`,
+  `sensor/temperature`, or just `sensor` when it has no device class.
+- Type headings use the device class (`battery`) or the domain (`sensor`), without
+  translating identifiers. `sensor/battery` and `binary_sensor/battery` remain
+  separate groups even though both headings read `battery`.
+
+`domain` remains available for domain-only grouping/filtering. For device-class
+matching across domains, use `attr.device_class: battery`. The old `device_class`
+shorthand has been removed; use `type: sensor/battery` or `attr.device_class` instead.
+All rules still combine with AND, so contradictory type/domain/attribute constraints
+match nothing.
 
 `hidden: true` matches entities hidden by either the user or an integration.
 `hidden: false` matches entities that are not hidden, including entities without a
@@ -306,8 +337,7 @@ Quote `"on"` and `"off"` in YAML. For low batteries:
 type: custom:auto-grid
 include:
   label: batteries
-  domain: sensor
-  device_class: battery
+  type: sensor/battery
   state: "< 20"
 sort:
   by: state
@@ -353,7 +383,7 @@ sort:
 ```
 
 Every filter field is also sortable: `area`, `floor`, `device`, `label`, `domain`,
-`entity_id`, `device_class`, `hidden`, `state`, `name`, `last_changed`, `last_updated`,
+`entity_id`, `type`, `hidden`, `state`, `name`, `last_changed`, `last_updated`,
 `integration`, and `attr.<name>`. The synthetic `group` field is the winning include's
 label or fallback index; it replaces the earlier `sort: include` spelling. Boolean operators `all`/`any`/`not` are not fields and cannot be sorted.
 

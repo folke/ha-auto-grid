@@ -227,7 +227,27 @@
           "group headers and incomplete rows contribute to size"
         )
         const createdBeforeMove = created
-        emitSections([section("Other", "<img src=x>", ["light.a", "light.b"])])
+        emitSections([
+          section("Pool", "<img src=x>", ["light.a"]),
+          section("Other", "Other", ["light.b"]),
+        ])
+        await tick()
+        assert(
+          grid.shadowRoot.querySelector(".group-header").textContent === "<img src=x>" &&
+            !grid.shadowRoot.querySelector("img"),
+          "group headings are text, never HTML"
+        )
+        emitSections([
+          section("Pool", "Renamed", ["light.a"]),
+          section("Other", "Other", ["light.b"]),
+        ])
+        await tick()
+        assert(
+          grid.shadowRoot.querySelector(".group-header").textContent === "Renamed" &&
+            tiles()[0] === retainedA,
+          "title-only changes update without recreating cards"
+        )
+        emitSections([section("Other", "Other", ["light.a", "light.b"])])
         await tick()
         assert(grid.shadowRoot.querySelectorAll(".section").length === 1, "removes empty groups")
         assert(
@@ -235,17 +255,28 @@
           "moving a card between groups preserves actual elements"
         )
         assert(
-          grid.shadowRoot.querySelector(".group-header").textContent === "<img src=x>" &&
-            !grid.shadowRoot.querySelector("img"),
-          "group headings are text, never HTML"
+          !grid.shadowRoot.querySelector(".group-header"),
+          "a single group's heading is suppressed"
         )
-        assert((await grid.getCardSize()) === 2, "merged group starts only one grid row")
-        emitSections([section("Other", "Renamed", ["light.a", "light.b"])])
+        assert((await grid.getCardSize()) === 1, "a single group reserves no header height")
+        grid.setConfig({ ...config, group: "area", title: "Grouped controls" })
         await tick()
         assert(
-          grid.shadowRoot.querySelector(".group-header").textContent === "Renamed" &&
-            tiles()[0] === retainedA,
-          "title-only changes update without recreating cards"
+          grid.shadowRoot.querySelector(".card-header").textContent === "Grouped controls" &&
+            !grid.shadowRoot.querySelector(".group-header") &&
+            (await grid.getCardSize()) === 2,
+          "top-level title remains visible for a single group"
+        )
+        emitSections([section("Pool", "Pool", ["light.a"]), section("Other", "Other", ["light.b"])])
+        await tick()
+        assert(
+          grid.shadowRoot.querySelectorAll(".group-header").length === 2 &&
+            (await grid.getCardSize()) === 5,
+          "headings and sizing return when a second group appears"
+        )
+        assert(
+          tiles()[0] === retainedA && tiles()[1] === tile && created === createdBeforeMove,
+          "one-to-many group transitions retain cards"
         )
         mutations = 0
         for (let i = 0; i < 100; i++) grid.hass = { ...hass, states: { generation: i } }
@@ -282,7 +313,12 @@
           subscriptions[5].request.variables.ag_integration_names.mqtt === "MQTT",
           "integration display names reach backend title templates"
         )
-        subscriptions[5].callback({ result: [section("mqtt", "MQTT", ["light.a"])] })
+        subscriptions[5].callback({
+          result: [
+            section("mqtt", "MQTT", ["light.a"]),
+            section("zha", "Zigbee Home Automation", ["light.b"]),
+          ],
+        })
         await tick()
         assert(
           first.shadowRoot.querySelector(".group-header").textContent === "MQTT" &&

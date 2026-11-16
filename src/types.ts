@@ -35,7 +35,7 @@ export interface Filter {
   label?: string | string[]
   domain?: string | string[]
   entity_id?: string | string[]
-  device_class?: string | string[] // short-hand for attributes.device_class
+  type?: string | string[]
   hidden?: boolean
   state?: Selection
   name?: Selection

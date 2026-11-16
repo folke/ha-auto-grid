@@ -262,17 +262,13 @@ test(
         { include: { entity_id: "light.z" }, exclude: [] },
         [row("light.z")],
       ],
-      [
-        "device class shorthand",
-        { include: { domain: "sensor", device_class: "battery" } },
-        [row("sensor.z")],
-      ],
+      ["entity type", { include: { domain: "sensor", type: "sensor/battery" } }, [row("sensor.z")]],
       [
         "contradictory device class constraints are ANDed",
         {
           include: {
             domain: "sensor",
-            device_class: "battery",
+            type: "sensor/battery",
             "attr.device_class": "temperature",
           },
         },
@@ -280,14 +276,14 @@ test(
       ],
       [
         "class list",
-        { include: { domain: "sensor", device_class: ["battery", "temperature"] } },
+        { include: { domain: "sensor", type: ["sensor/battery", "sensor/temperature"] } },
         [row("sensor.z"), row("sensor.a")],
       ],
       [
         "global nested exclusion",
         {
           include: groups,
-          exclude: { any: [{ device_class: "battery" }, { not: { domain: "sensor" } }] },
+          exclude: { any: [{ "attr.device_class": "battery" }, { not: { domain: "sensor" } }] },
         },
         [row("sensor.missing", 1), row("sensor.a", 1)],
       ],

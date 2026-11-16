@@ -24,7 +24,7 @@ const fieldKeys = new Set<FilterField>([
   "label",
   "domain",
   "entity_id",
-  "device_class",
+  "type",
   "hidden",
   "state",
   "name",
@@ -122,18 +122,14 @@ function validateFilter(filter: Filter, depth = 0): void {
   for (const [key, value] of Object.entries(filter)) {
     if (!isField(key) && !booleanKeys.has(key)) throw new Error(`Unknown filter rule: ${key}`)
     if (
-      [
-        "area",
-        "floor",
-        "device",
-        "label",
-        "domain",
-        "entity_id",
-        "device_class",
-        "integration",
-      ].includes(key)
+      ["area", "floor", "device", "label", "domain", "entity_id", "type", "integration"].includes(
+        key
+      )
     ) {
       const values = strings(value, key)
+      if (key === "type" && values.some((v) => !/^[a-z0-9_]+(?:\/[a-z0-9_]+)?$/.test(v))) {
+        throw new Error("type must be a domain or domain/device_class, not a pattern")
+      }
       if (key === "domain" && values.some((v) => !domain.test(v))) {
         throw new Error("domain must contain valid domain names, not patterns")
       }
@@ -160,6 +156,15 @@ function predicate(filter: Filter, sets: Map<string, string>): string {
       expressions.push(`entity in ${sets.get(source)}`)
     } else if (key === "domain") {
       expressions.push(`${fieldValue("domain", 0)} in ${JSON.stringify(strings(value, key))}`)
+    } else if (key === "type") {
+      expressions.push(
+        join(
+          strings(value, key).map((type) =>
+            matchOne(fieldValue(type.includes("/") ? "type" : "domain", 0), type)
+          ),
+          "or"
+        )
+      )
     } else if (key === "hidden") {
       const target = fieldValue(key, 0)
       expressions.push(value ? target : `not ${target}`)
@@ -198,10 +203,14 @@ function candidates(filter: Filter): string {
     const source = candidates(child)
     if (source !== "states | map(attribute='entity_id') | list") return source
   }
-  if (filter.domain !== undefined) {
-    return `(${strings(filter.domain, "domain")
-      .map((d) => `(states.${d} | map(attribute='entity_id') | list)`)
-      .join(" + ")})`
+  const domains =
+    filter.domain !== undefined
+      ? strings(filter.domain, "domain")
+      : filter.type !== undefined
+        ? [...new Set(strings(filter.type, "type").map((type) => type.split("/")[0]))]
+        : undefined
+  if (domains) {
+    return `(${domains.map((d) => `(states.${d} | map(attribute='entity_id') | list)`).join(" + ")})`
   }
   return "states | map(attribute='entity_id') | list"
 }
@@ -220,8 +229,8 @@ export function fieldValue(field: SortField, include: number): string {
       return "(labels(entity) | map('label_name') | select('string') | sort | list)"
     case "domain":
       return "entity.split('.')[0]"
-    case "device_class":
-      return `state_attr(entity, ${literal("device_class")})`
+    case "type":
+      return "(entity.split('.')[0] ~ ('/' ~ state_attr(entity, 'device_class') if state_attr(entity, 'device_class') else ''))"
     case "hidden":
       return "is_hidden_entity(entity)"
     case "integration":
@@ -242,6 +251,14 @@ export function fieldValue(field: SortField, include: number): string {
       }
       throw new Error(`Unknown field: ${field}`)
   }
+}
+
+export function fieldTitle(field: SortField): string {
+  if (field === "type") return "group.split('/')[-1]"
+  if (field === "integration") {
+    return "((ag_integration_names | default({})).get(group, group) if group is not none else '')"
+  }
+  return "(group if group is not none else '')"
 }
 
 function validateSort(sort: Sort): void {
@@ -347,20 +364,19 @@ function compileQuery(
   lines.push(`{% set ag_rows = ns.rows${limit === undefined ? "" : `[:${limit}]`} %}`)
   if (groupConfig) {
     lines.push(
-      `{% macro ag_title(entity_id, entity, group, group_name) -%}${groupConfig.title}{%- endmacro %}`,
+      `{% macro ag_title(entity_id, entity, group, group_name, group_count) -%}${groupConfig.title}{%- endmacro %}`,
+      "{% set group_count = ag_rows | map(attribute='bucket_key') | unique(case_sensitive=true) | list | count %}",
       "{% set sections = namespace(rows=[], keys=[]) %}",
       "{% for row in ag_rows %}",
       "{% if row.bucket_key not in sections.keys %}",
       "{% set sections.keys = sections.keys + [row.bucket_key] %}",
       "{% set group = row.bucket %}",
-      groupConfig.by === "integration"
-        ? "{% set group_name = (ag_integration_names | default({})).get(group, group) if group is not none else '' %}"
-        : "{% set group_name = group if group is not none else '' %}",
+      `{% set group_name = ${fieldTitle(groupConfig.by)} %}`,
       "{% set members = namespace(rows=[]) %}",
       "{% for member in ag_rows | selectattr('bucket_key', 'eq', row.bucket_key) %}",
       "{% set members.rows = members.rows + [{'entity': member.entity, 'group': member.group}] %}",
       "{% endfor %}",
-      "{% set title = ag_title(row.entity, states[row.entity], group, group_name) | trim %}",
+      "{% set title = ag_title(row.entity, states[row.entity], group, group_name, group_count) | trim %}",
       "{% set sections.rows = sections.rows + [{'key': row.bucket_key, 'value': group, 'title': title, 'matches': members.rows}] %}",
       "{% endif %}",
       "{% endfor %}",

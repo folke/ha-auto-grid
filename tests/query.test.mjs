@@ -89,7 +89,7 @@ test("sort strings and mixed lists compile identically to their expanded forms",
     "device",
     "label",
     "domain",
-    "device_class",
+    "type",
     "hidden",
     "attr.battery",
     "attr.some.integration_key",
@@ -127,7 +127,7 @@ test("fieldValue supplies every sortable filter field and optional by defaults t
     "label",
     "domain",
     "entity_id",
-    "device_class",
+    "type",
     "hidden",
     "state",
     "name",
@@ -185,7 +185,8 @@ test("attribute filter names are literal, quoted, and non-empty", () => {
       )
     )
   }
-  assert.equal(query({ device_class: "battery" }), query({ "attr.device_class": "battery" }))
+  assert.throws(() => normalizeConfig({ include: { device_class: "battery" } }), /Unknown filter/)
+  assert.throws(() => normalizeConfig({ include: {}, sort: "device_class" }), /Unknown sort/)
   for (const filter of [
     { "attr.": true },
     { "attr.level": {} },

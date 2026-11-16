@@ -113,7 +113,7 @@ test(
       [{ include: selection, sort: "label" }, ["sensor.c", "sensor.d", "sensor.a", "sensor.b"]],
       [{ include: selection, sort: "domain" }, ["sensor.a", "sensor.b", "sensor.c", "sensor.d"]],
       [
-        { include: selection, sort: "device_class" },
+        { include: selection, sort: "attr.device_class" },
         ["sensor.c", "sensor.a", "sensor.b", "sensor.d"],
       ],
       [{ include: selection, sort: "hidden" }, ["sensor.b", "sensor.c", "sensor.d", "sensor.a"]],

@@ -34,7 +34,7 @@ export class AutoGrid extends LitElement {
   )
 
   static getStubConfig(): AutoGridConfig {
-    return { columns: 2, include: { domain: "light" }, card: { type: "tile" } }
+    return { columns: 2, include: { type: "light" }, card: { type: "tile" } }
   }
 
   setConfig(config: AutoGridConfig): void {
@@ -108,7 +108,7 @@ export class AutoGrid extends LitElement {
     let size = 0
     const sections = this.grid.sections ?? [{ title: "", cards: this.grid.cards }]
     for (const section of sections) {
-      if (section.title) size++
+      if (sections.length > 1 && section.title) size++
       const heights = section.cards.map(({ entity }) => byEntity.get(entity) ?? 1)
       for (let i = 0; i < heights.length; i += columns)
         size += Math.max(...heights.slice(i, i + columns))
@@ -165,7 +165,7 @@ export class AutoGrid extends LitElement {
       ({ key }) => key,
       (section) =>
         html` <section class="section">
-          ${section.title ? html`<h2 class="group-header">${section.title}</h2>` : nothing}
+          ${sections.length > 1 && section.title ? html`<h2 class="group-header">${section.title}</h2>` : nothing}
           <div class="grid">
             ${repeat(
               section.cards,
