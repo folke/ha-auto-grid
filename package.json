@@ -1,0 +1,32 @@
+{
+  "name": "ha-auto-grid",
+  "version": "0.1.0",
+  "private": true,
+  "description": "An automatically populated grid of Home Assistant cards",
+  "author": "Folke Lemaitre",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "watch": "vite build --watch",
+    "check": "tsc",
+    "test": "node --test tests/*.test.mjs",
+    "test:browser": "pnpm build && node tests/browser.mjs",
+    "lint": "oxlint --deny-warnings",
+    "lint:fix": "pnpm run lint --fix",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check ."
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "lit": "3.3.3",
+    "oxfmt": "0.77.0",
+    "oxlint": "1.92.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.6"
+  },
+  "packageManager": "pnpm@12.18.0",
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}

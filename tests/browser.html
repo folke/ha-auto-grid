@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Auto Grid browser smoke test</title>
+  </head>
+  <body>
+    <pre id="result">Running…</pre>
+    <script type="module">
+      import "../dist/auto-grid.js"
+
+      const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
+      let assertions = 0
+      function assert(value, message) {
+        assertions++
+        if (!value) throw new Error(message)
+      }
+      try {
+        const subscriptions = []
+        let stops = 0
+        let created = 0
+        class TestTile extends HTMLElement {
+          setConfig(config) {
+            this.config = config
+            this.textContent = config.entity
+          }
+          getCardSize() {
+            return 1
+          }
+        }
+        customElements.define("test-tile", TestTile)
+        window.loadCardHelpers = async () => ({
+          createCardElement(config) {
+            created++
+            const card = document.createElement("test-tile")
+            card.setConfig(config)
+            return card
+          },
+        })
+        const connection = {
+          subscribeMessage(callback, request) {
+            subscriptions.push({ callback, request })
+            return Promise.resolve(() => {
+              stops++
+            })
+          },
+        }
+        const hass = { connection, states: {} }
+        const config = {
+          filter: { area: "pool", domain: "light" },
+          options: { name: { type: "entity" } },
+        }
+        const grid = document.createElement("auto-grid")
+        grid.setConfig(config)
+        grid.hass = hass
+        assert(subscriptions.length === 0, "no subscription while disconnected")
+        document.body.append(grid)
+        await tick()
+        assert(subscriptions.length === 1, "subscribed when mounted")
+        subscriptions[0].callback({ result: ["light.a", "light.b"] })
+        await tick()
+        await grid.updateComplete
+        const tiles = () => [...grid.shadowRoot.querySelectorAll("test-tile")]
+        const [a, b] = tiles()
+        assert(
+          a?.config.entity === "light.a" && b?.config.entity === "light.b",
+          "renders native helper cards"
+        )
+        assert(a.config.type === "tile" && a.config.name.type === "entity", "shared options")
+        assert(a.hass === hass, "initial hass forwarded")
+        assert(
+          getComputedStyle(grid.shadowRoot.querySelector(".grid")).display === "grid",
+          "CSS grid layout"
+        )
+        assert((await grid.getCardSize()) === 1, "card size uses row maxima")
+        let mutations = 0
+        const observer = new MutationObserver(() => mutations++)
+        observer.observe(grid.shadowRoot, { subtree: true, childList: true, attributes: true })
+        for (let i = 0; i < 100; i++) grid.hass = { ...hass, states: { generation: i } }
+        await tick()
+        assert(mutations === 0, "hass updates do not touch grid DOM")
+        assert(a.hass.states.generation === 99, "updated state reaches children")
+        subscriptions[0].callback({ result: ["light.b", "light.a", "light.c"] })
+        await tick()
+        assert(tiles()[0] === b && tiles()[1] === a, "keyed rendering preserves card identity")
+        assert(created === 3, "only the added card was created")
+        grid.setConfig({ ...config, columns: 3 })
+        await tick()
+        assert(
+          created === 3 && subscriptions.length === 1,
+          "layout edits don't recreate cards or query"
+        )
+        assert(
+          getComputedStyle(grid).getPropertyValue("--auto-grid-columns").trim() === "3",
+          "column configuration"
+        )
+        grid.remove()
+        await tick()
+        assert(stops === 1, "unsubscribes on removal")
+        document.body.append(grid)
+        await tick()
+        subscriptions[1].callback({ result: ["light.b", "light.a", "light.c"] })
+        await tick()
+        assert(tiles()[0] === b && created === 3, "remount reuses existing cards")
+        grid.setConfig({ ...config, show_empty: false })
+        subscriptions[1].callback({ result: [] })
+        await tick()
+        assert(getComputedStyle(grid).display === "none", "empty result hides grid")
+        assert(!grid.hidden && stops === 1, "empty grids remain subscribed so they can recover")
+        grid.preview = true
+        await tick()
+        assert(getComputedStyle(grid).display !== "none", "empty grid remains editable in preview")
+        grid.preview = false
+        subscriptions[1].callback({ result: ["light.a"] })
+        await tick()
+        assert(
+          getComputedStyle(grid).display !== "none" && tiles().length === 1,
+          "empty grid recovers"
+        )
+        subscriptions[1].callback({ error: { message: "bad query" } })
+        await tick()
+        assert(
+          grid.shadowRoot.querySelector('[role="alert"]').textContent.includes("bad query"),
+          "query errors are visible"
+        )
+        grid.shadowRoot.querySelector("button").click()
+        await tick()
+        subscriptions[2].callback({ result: ["light.a"] })
+        await tick()
+        assert(
+          tiles().length === 1 && !grid.shadowRoot.querySelector('[role="alert"]'),
+          "retry recovers"
+        )
+        observer.disconnect()
+        grid.remove()
+        await tick()
+        document.body.dataset.status = "passed"
+        document.querySelector("#result").textContent = `Passed ${assertions} browser assertions`
+      } catch (error) {
+        document.body.dataset.status = "failed"
+        document.querySelector("#result").textContent = error.stack
+      }
+    </script>
+  </body>
+</html>
