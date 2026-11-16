@@ -106,9 +106,15 @@ export class AutoGrid extends LitElement {
     )
     let size = 0
     for (let i = 0; i < sizes.length; i += columns) size += Math.max(...sizes.slice(i, i + columns))
-    return (
-      size || (this.config?.show_empty === false && !this.grid.loading && !this.grid.error ? 0 : 1)
-    )
+    const contentSize =
+      size ||
+      (this.config?.show_empty === false &&
+      !this.grid.loading &&
+      !this.grid.error &&
+      !this.currentPreview
+        ? 0
+        : 1)
+    return contentSize + (contentSize && this.config?.title ? 1 : 0)
   }
 
   getGridOptions(): { columns: number; rows: string; min_columns: number } {
@@ -116,6 +122,20 @@ export class AutoGrid extends LitElement {
   }
 
   protected render() {
+    if (
+      !this.grid.error &&
+      !this.grid.loading &&
+      !this.grid.cards.length &&
+      this.config?.show_empty === false &&
+      !this.currentPreview
+    )
+      return nothing
+    return html`${
+      this.config?.title ? html`<h1 class="card-header">${this.config.title}</h1>` : nothing
+    }${this.renderContent()}`
+  }
+
+  private renderContent() {
     if (this.grid.error) {
       return html`<ha-card
         ><div class="message" role="alert">
@@ -126,13 +146,11 @@ export class AutoGrid extends LitElement {
       >`
     }
     if (!this.grid.cards.length) {
-      return this.config?.show_empty === false && !this.grid.loading && !this.currentPreview
-        ? nothing
-        : html` <ha-card
-            ><div class="message" role="status">
-              ${this.grid.loading ? "Loading entities…" : "No matching entities"}
-            </div></ha-card
-          >`
+      return html`<ha-card
+        ><div class="message" role="status">
+          ${this.grid.loading ? "Loading entities…" : "No matching entities"}
+        </div></ha-card
+      >`
     }
     return html`<div class="grid">
       ${repeat(
@@ -149,6 +167,18 @@ export class AutoGrid extends LitElement {
     }
     :host([empty]) {
       display: none;
+    }
+    .card-header {
+      color: var(--ha-card-header-color, var(--primary-text-color));
+      text-align: var(--ha-stack-title-text-align, start);
+      font-family: var(--ha-card-header-font-family, inherit);
+      font-size: var(--ha-card-header-font-size, var(--ha-font-size-2xl, 24px));
+      font-weight: var(--ha-font-weight-normal, 400);
+      margin-block: 0;
+      letter-spacing: -0.012em;
+      line-height: var(--ha-line-height-condensed, 1.2);
+      display: block;
+      padding: 24px 16px 16px;
     }
     .grid {
       display: grid;

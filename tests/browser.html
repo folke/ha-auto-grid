@@ -77,6 +77,7 @@
           "CSS grid layout"
         )
         assert((await grid.getCardSize()) === 1, "card size uses row maxima")
+        assert(!grid.shadowRoot.querySelector(".card-header"), "title is optional")
         let mutations = 0
         const observer = new MutationObserver(() => mutations++)
         observer.observe(grid.shadowRoot, { subtree: true, childList: true, attributes: true })
@@ -88,7 +89,7 @@
         await tick()
         assert(tiles()[0] === b && tiles()[1] === a, "keyed rendering preserves card identity")
         assert(created === 3, "only the added card was created")
-        grid.setConfig({ ...config, columns: 3 })
+        grid.setConfig({ ...config, columns: 3, title: "Pool lights" })
         await tick()
         assert(
           created === 3 && subscriptions.length === 1,
@@ -98,6 +99,25 @@
           getComputedStyle(grid).getPropertyValue("--auto-grid-columns").trim() === "3",
           "column configuration"
         )
+        assert(
+          grid.shadowRoot.querySelector("h1.card-header").textContent === "Pool lights",
+          "renders a native-style grid heading"
+        )
+        assert((await grid.getCardSize()) === 2, "title contributes to card size")
+        assert(tiles()[0] === b, "adding a title preserves existing cards")
+        grid.setConfig({ ...config, columns: 3, title: "<img src=x onerror=alert(1)>" })
+        await tick()
+        assert(
+          grid.shadowRoot.querySelector(".card-header").textContent ===
+            "<img src=x onerror=alert(1)>" && !grid.shadowRoot.querySelector("img"),
+          "title renders as text, not HTML"
+        )
+        grid.setConfig({ ...config, columns: 3 })
+        await tick()
+        assert(
+          !grid.shadowRoot.querySelector(".card-header") && tiles()[0] === b,
+          "removing a title preserves child cards"
+        )
         grid.remove()
         await tick()
         assert(stops === 1, "unsubscribes on removal")
@@ -106,20 +126,32 @@
         emit(1, ["light.b", "light.a", "light.c"])
         await tick()
         assert(tiles()[0] === b && created === 3, "remount reuses existing cards")
-        grid.setConfig({ ...config, show_empty: false })
+        grid.setConfig({ ...config, show_empty: false, title: "Pool lights" })
         emit(1, [])
         await tick()
         assert(getComputedStyle(grid).display === "none", "empty result hides grid")
+        assert(
+          !grid.shadowRoot.querySelector(".card-header") && (await grid.getCardSize()) === 0,
+          "hidden empty grid has no title or reserved height"
+        )
         assert(!grid.hidden && stops === 1, "empty grids remain subscribed so they can recover")
         grid.preview = true
         await tick()
         assert(getComputedStyle(grid).display !== "none", "empty grid remains editable in preview")
+        assert(
+          grid.shadowRoot.querySelector(".card-header").textContent === "Pool lights",
+          "empty preview shows the configured title"
+        )
         grid.preview = false
         emit(1, ["light.a"])
         await tick()
         assert(
           getComputedStyle(grid).display !== "none" && tiles().length === 1,
           "empty grid recovers"
+        )
+        assert(
+          grid.shadowRoot.querySelector(".card-header").textContent === "Pool lights",
+          "title recovers with matching entities"
         )
         subscriptions[1].callback({ error: { message: "bad query" } })
         await tick()

@@ -56,6 +56,7 @@ export interface Sort {
 
 export interface AutoGridConfig {
   type?: string
+  title?: string
   columns?: number
   square?: boolean
   show_empty?: boolean
@@ -78,6 +79,7 @@ export interface CompiledQuery {
 }
 
 export interface GridConfig {
+  title?: string
   columns: number
   square: boolean
   show_empty: boolean

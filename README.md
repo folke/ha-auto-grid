@@ -27,6 +27,7 @@ and paste one of the configurations below. Configuration is currently YAML-only.
 
 ```yaml
 type: custom:auto-grid
+title: Pool lights
 columns: 2
 include:
   area: pool
@@ -39,6 +40,8 @@ card:
 
 `card.type` defaults to `tile`, `columns` to `2`, and `square` to `false`.
 Results are sorted by include group, then alphabetically by name by default.
+An optional `title` appears above the grid with native grid-card header styling.
+It hides together with the grid when empty and `show_empty` is false.
 
 Custom entity-based cards work too:
 
@@ -227,6 +230,7 @@ model rather than the legacy/composed `friendly_name` attribute. It does not eva
 | `include`    | Required           | A selection filter or list; groups may override `card`      |
 | `exclude`    | —                  | A global exclusion filter or list                           |
 | `card`       | `{ type: tile }`   | Shared child-card configuration; `entity` is reserved       |
+| `title`      | —                  | Optional text heading above the grid                        |
 | `columns`    | `2`                | Positive integer; fixed equal-width columns                 |
 | `square`     | `false`            | Square cells, like the native grid card                     |
 | `show_empty` | `false`            | Show an empty-state message instead of hiding the grid      |

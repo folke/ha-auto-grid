@@ -20,6 +20,20 @@ test("defaults to two columns of tiles and include/name sorting without mutating
   assert.deepEqual(input, original)
 })
 
+test("title is optional presentation configuration and does not change the query", () => {
+  const base = normalizeConfig({ include: { domain: "light" } })
+  assert.equal(base.title, undefined)
+  for (const title of ["Pool lights", "", "<b>Lights</b>"]) {
+    const config = normalizeConfig({ include: { domain: "light" }, title })
+    assert.equal(config.title, title)
+    assert.equal(config.query.template, base.query.template)
+    assert.deepEqual(config.query.cards, base.query.cards)
+  }
+  for (const title of [null, 123, false, [], {}]) {
+    assert.throws(() => normalizeConfig({ include: {}, title }), /title must be a string/)
+  }
+})
+
 test("area queries restrict candidates and hoist shared registry helpers", () => {
   const template = query(
     [

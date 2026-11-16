@@ -344,6 +344,9 @@ function validateCard(card: unknown): asserts card is Partial<CardConfig> {
 export function normalizeConfig(input: AutoGridConfig): GridConfig {
   object(input, "Auto Grid configuration")
   const config = structuredClone(input)
+  if (config.title !== undefined && typeof config.title !== "string") {
+    throw new Error("title must be a string")
+  }
   for (const old of ["filter", "entities", "options"]) {
     if (old in config)
       throw new Error(`${old} is no longer supported; use include/exclude and card`)
@@ -383,6 +386,7 @@ export function normalizeConfig(input: AutoGridConfig): GridConfig {
         : [config.sort]
   sorts.forEach(validateSort)
   return {
+    title: config.title,
     columns: config.columns ?? 2,
     square: config.square ?? false,
     show_empty: config.show_empty ?? false,
