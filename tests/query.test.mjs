@@ -74,6 +74,43 @@ test("explicit sort replaces defaults; empty sorts disable all sorting including
   assert.match(query({ domain: "light" }, { sort: { by: "name" } }), /sort\(attribute='entity'\)/)
 })
 
+test("sort strings and mixed lists compile identically to their expanded forms", () => {
+  const include = { domain: "sensor" }
+  for (const by of [
+    "include",
+    "entity_id",
+    "name",
+    "state",
+    "last_changed",
+    "last_updated",
+    "attr.battery",
+    "attr.some.integration_key",
+  ]) {
+    assert.equal(query(include, { sort: by }), query(include, { sort: { by } }))
+  }
+  assert.equal(query(include, { sort: ["include", "name"] }), query(include))
+  assert.equal(
+    query(include, { sort: ["include", { by: "attr.battery", numeric: true }, "name"] }),
+    query(include, {
+      sort: [{ by: "include" }, { by: "attr.battery", numeric: true }, { by: "name" }],
+    })
+  )
+  for (const sort of [
+    "",
+    "nope",
+    "attribute",
+    "attr.",
+    null,
+    3,
+    [false],
+    [["name"]],
+    { by: "attr.", numeric: true },
+    { by: "name", attribute: "battery" },
+  ]) {
+    assert.throws(() => normalizeConfig({ include, sort }))
+  }
+})
+
 test("attribute filter names are literal, quoted, and non-empty", () => {
   for (const attribute of [
     "battery",

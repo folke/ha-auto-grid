@@ -68,7 +68,7 @@ export interface AutoGridConfig {
   card?: Partial<CardConfig>
   include: Include | Include[]
   exclude?: Filter | Filter[]
-  sort?: Sort | Sort[]
+  sort?: Sort | Sort["by"] | (Sort | Sort["by"])[]
   limit?: number
   [key: string]: unknown
 }

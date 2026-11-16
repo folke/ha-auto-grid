@@ -375,7 +375,11 @@ export function normalizeConfig(input: AutoGridConfig): GridConfig {
       : Array.isArray(config.sort)
         ? config.sort
         : [config.sort]
-  sorts.forEach(validateSort)
+  const normalizedSorts = sorts.map((sort) => {
+    const normalized = typeof sort === "string" ? { by: sort } : sort
+    validateSort(normalized)
+    return normalized
+  })
   return {
     title: config.title,
     columns: config.columns ?? 2,
@@ -383,7 +387,7 @@ export function normalizeConfig(input: AutoGridConfig): GridConfig {
     show_empty: config.show_empty ?? false,
     card,
     query: {
-      template: compileQuery(includeFilters, excludes, sorts, config.limit),
+      template: compileQuery(includeFilters, excludes, normalizedSorts, config.limit),
       cards,
     },
   }

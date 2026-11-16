@@ -162,10 +162,10 @@ include:
   attr.device_class: battery
   attr.battery_level: "< 20"
 sort:
-  - by: include
+  - include
   - by: attr.battery_level
     numeric: true
-  - by: name
+  - name
 ```
 
 `not` accepts one filter or a list interpreted as `not any`. These differ:
@@ -205,8 +205,8 @@ rules, and per-group sorting/pagination are not implemented. Unknown filter rule
 are rejected. The earlier `filter`, `entities`, and `options` fields have been replaced
 by `include`/`exclude` and `card`; old configurations produce a migration error.
 The previous `attributes: { battery: ... }` notation is now `attr.battery: ...`;
-`sort: { by: attribute, attribute: battery }` is now `sort: { by: attr.battery }`
-(add `numeric: true` for numeric ordering).
+`sort: { by: attribute, attribute: battery }` is now `sort: attr.battery` (or
+`sort: { by: attr.battery, numeric: true }` for numeric ordering).
 
 ## Sorting and limits
 
@@ -214,24 +214,24 @@ The default is:
 
 ```yaml
 sort:
-  - by: include
-  - by: name
+  - include
+  - name
 ```
 
-An explicit `sort` **replaces** the default. A single sort object is shorthand for a
-one-element list. Lists are in priority order: the first entry is the primary key,
-with subsequent entries breaking ties.
+An explicit `sort` **replaces** the default. A string such as `sort: name` is shorthand
+for `sort: { by: name }`. A single string or object is shorthand for a one-element list.
+Lists can mix strings and objects and are in priority order: the first entry is the
+primary key, with subsequent entries breaking ties.
 
 ```yaml
 # Alphabetical across all groups, without include grouping
-sort:
-  by: name
+sort: name
 ```
 
 ```yaml
 # Include grouping, then descending numeric state within each group
 sort:
-  - by: include
+  - include
   - by: state
     numeric: true
     reverse: true
@@ -259,17 +259,17 @@ model rather than the legacy/composed `friendly_name` attribute. It does not eva
 
 ## Options
 
-| Option       | Default            | Description                                                 |
-| ------------ | ------------------ | ----------------------------------------------------------- |
-| `include`    | Required           | A selection filter or list; groups may override `card`      |
-| `exclude`    | —                  | A global exclusion filter or list                           |
-| `card`       | `{ type: tile }`   | Shared child-card configuration; `entity` is reserved       |
-| `title`      | —                  | Optional text heading above the grid                        |
-| `columns`    | `2`                | Positive integer; fixed equal-width columns                 |
-| `square`     | `false`            | Square cells, like the native grid card                     |
-| `show_empty` | `false`            | Show an empty-state message instead of hiding the grid      |
-| `sort`       | Include, then name | Sort object or priority-ordered list; `[]` disables sorting |
-| `limit`      | —                  | Maximum number of results, applied last                     |
+| Option       | Default            | Description                                                              |
+| ------------ | ------------------ | ------------------------------------------------------------------------ |
+| `include`    | Required           | A selection filter or list; groups may override `card`                   |
+| `exclude`    | —                  | A global exclusion filter or list                                        |
+| `card`       | `{ type: tile }`   | Shared child-card configuration; `entity` is reserved                    |
+| `title`      | —                  | Optional text heading above the grid                                     |
+| `columns`    | `2`                | Positive integer; fixed equal-width columns                              |
+| `square`     | `false`            | Square cells, like the native grid card                                  |
+| `show_empty` | `false`            | Show an empty-state message instead of hiding the grid                   |
+| `sort`       | Include, then name | Sort string/object or mixed priority-ordered list; `[]` disables sorting |
+| `limit`      | —                  | Maximum number of results, applied last                                  |
 
 This is an equal-column grid, not the full Sections layout engine. It does not
 implement per-card column/row spans. Grid spacing can be customized with the

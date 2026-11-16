@@ -430,7 +430,7 @@ test(
         [...ordered].reverse(),
       ],
       [
-        { include: { domain: "sensor" }, sort: { by: "attr.friendly_name" } },
+        { include: { domain: "sensor" }, sort: "attr.friendly_name" },
         [
           "sensor.energy",
           "sensor.main",
@@ -467,7 +467,7 @@ test(
 )
 
 test(
-  "attribute notation and array NOT execute with literal-key semantics",
+  "attribute notation, array NOT, and sort shorthand execute with literal-key semantics",
   {
     skip: python.status !== 0 ? "Optional check requires Python 3 with jinja2 installed" : false,
   },
@@ -545,7 +545,7 @@ test(
       [{ include: { domain: "sensor", [`attr.${odd}`]: true } }, ["sensor.a"]],
       [{ include: { domain: "sensor", "attr.absent": null } }, all],
       [
-        { include: { domain: "sensor" }, sort: { by: "attr.level" } },
+        { include: { domain: "sensor" }, sort: "attr.level" },
         ["sensor.c", "sensor.b", "sensor.a", "sensor.d"],
       ],
       [
@@ -559,16 +559,12 @@ test(
       [
         {
           include: { domain: "sensor" },
-          sort: [
-            { by: "include" },
-            { by: "attr.level", numeric: true, reverse: true },
-            { by: "name" },
-          ],
+          sort: ["include", { by: "attr.level", numeric: true, reverse: true }, "name"],
         },
         ["sensor.b", "sensor.d", "sensor.a", "sensor.c"],
       ],
-      [{ include: { domain: "sensor" }, sort: { by: "name" } }, all],
-      [{ include: { domain: "sensor" }, sort: [{ by: "include" }, { by: "name" }] }, all],
+      [{ include: { domain: "sensor" }, sort: "name" }, all],
+      [{ include: { domain: "sensor" }, sort: ["include", "name"] }, all],
     ]
     const output = spawnSync(
       "python3",
