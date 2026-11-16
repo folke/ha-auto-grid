@@ -51,10 +51,17 @@ function object(value: unknown, name: string): asserts value is Record<string, u
   }
 }
 
-function strings(value: unknown, name: string): string[] {
+function strings(value: unknown, name: string, allowJson = false): string[] {
+  if (allowJson && typeof value === "string" && /^\s*\[/.test(value)) {
+    try {
+      value = JSON.parse(value)
+    } catch {
+      throw new Error(`${name} must contain a valid JSON array; use | to_json in templates`)
+    }
+  }
   const values = Array.isArray(value) ? value : [value]
-  if (!values.length || values.some((v) => typeof v !== "string" || !v.trim())) {
-    throw new Error(`${name} must be a non-empty string or list of strings`)
+  if ((!allowJson && !values.length) || values.some((v) => typeof v !== "string" || !v.trim())) {
+    throw new Error(`${name} must be a non-empty string or list of non-empty strings`)
   }
   return values as string[]
 }
@@ -128,7 +135,7 @@ function validateFilter(filter: Filter, depth = 0): void {
         key
       )
     ) {
-      const values = strings(value, key)
+      const values = strings(value, key, key === "entity_id")
       if (key === "type" && values.some((v) => !/^[a-z0-9_]+(?:\/[a-z0-9_]+)?$/.test(v))) {
         throw new Error("type must be a domain or domain/device_class, not a pattern")
       }
@@ -163,6 +170,13 @@ function predicate(filter: Filter, sets: Map<string, string>): string {
             match("device_id(entity)", value as Selection),
             match(fieldValue("device", 0), value as Selection),
           ],
+          "or"
+        )
+      )
+    } else if (key === "entity_id") {
+      expressions.push(
+        join(
+          strings(value, key, true).map((id) => matchOne("entity", id)),
           "or"
         )
       )
@@ -216,7 +230,7 @@ function candidates(filter: Filter): string {
     if (filter[key] !== undefined) return membership(key, strings(filter[key], key))
   }
   if (filter.entity_id !== undefined) {
-    const ids = strings(filter.entity_id, "entity_id")
+    const ids = strings(filter.entity_id, "entity_id", true)
     if (ids.every((id) => entityId.test(id))) return JSON.stringify(ids)
   }
   for (const child of filter.all ?? []) {

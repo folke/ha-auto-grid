@@ -110,6 +110,56 @@ sort: []
 `sort: []` preserves the supplied order. `include: []` selects nothing; `include: {}`
 selects every entity with a state. Be mindful of HA's rate limits for broad queries.
 
+### JSON entity lists
+
+`entity_id` also accepts a string containing a JSON array of non-empty strings:
+
+```yaml
+include:
+  entity_id: '["sensor.b", "sensor.a"]'
+sort: []
+```
+
+This is equivalent to a normal YAML list. Literal entity IDs become direct candidates
+(no full-state scan), duplicates are removed, and `sort: []` preserves list order.
+Glob/regex entries still use normal matching. Empty lists (`entity_id: []` or `"[]"`)
+select nothing; excluding an empty list removes nothing, and negating it matches all
+otherwise eligible entities.
+
+Only `entity_id` parses JSON this way. Strings starting with `[` after whitespace
+must be valid JSON arrays; malformed JSON and non-string/empty entries produce a
+configuration error. Python-style `['sensor.foo']` is not JSON—use `| to_json`.
+Other fields and `$` template output types are unchanged.
+
+This lets an outer Auto Grid supply a generated selection to an inner grid without
+turning arbitrary card templates into native lists:
+
+```yaml
+type: custom:auto-grid
+columns: 1
+include:
+  entity_id: "pyscript.alert_*"
+card:
+  type: custom:auto-grid
+  columns: 2
+  sort: []
+  include:
+    # First, the alert itself
+    - $entity_id: "{{ entity }}"
+      card:
+        type: tile
+    # Then the related IDs, in their original order
+    - $entity_id: >-
+        {{ state_attr(entity, 'entities') | default([], true) | to_json }}
+      card:
+        type: custom:mushroom-entity-card
+```
+
+The outer grid resolves both `$entity_id` values in the parent entity's context. The
+inner grid parses the resulting JSON string normally. Missing/empty `entities` leaves
+just the alert header. Each nested grid owns its own query subscription; literal
+child lists keep those queries scoped, and disconnecting the parent cleans them up.
+
 ## Explicit card-option templates
 
 Prefix a property name with `$` to have **Auto Grid** evaluate its value as Jinja.
@@ -304,7 +354,7 @@ one Jinja query and subscribed through HA's `render_template` WebSocket API.
 | `device`       | Device ID or effective name; exact, wildcard, `/regex/`, or a list   |
 | `label`        | Label ID/name, or a list                                             |
 | `domain`       | Exact domain name, or a list, e.g. `light`                           |
-| `entity_id`    | Exact ID, wildcard, `/regex/`, or a list                             |
+| `entity_id`    | Exact ID, wildcard, `/regex/`, native list, or JSON-array string     |
 | `type`         | HA-style entity type: domain or domain/device_class, or a list       |
 | `hidden`       | Boolean; whether HA's entity registry marks the entity as hidden     |
 | `state`        | Exact value, wildcard, `/regex/`, numeric comparison, or a list      |

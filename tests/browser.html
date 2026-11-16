@@ -33,7 +33,9 @@
         window.loadCardHelpers = async () => ({
           createCardElement(config) {
             created++
-            const card = document.createElement("test-tile")
+            const card = document.createElement(
+              config.type === "custom:auto-grid" ? "auto-grid" : "test-tile"
+            )
             card.setConfig(config)
             return card
           },
@@ -458,6 +460,85 @@
         dynamicObserver.disconnect()
         dynamic.remove()
         await tick()
+        const parent = document.createElement("auto-grid")
+        const parentIndex = subscriptions.length
+        const parentEntity = "pyscript.alert_example"
+        parent.setConfig({
+          include: { entity_id: parentEntity },
+          card: {
+            type: "custom:auto-grid",
+            sort: [],
+            include: [
+              { $entity_id: "{{ entity }}", card: { type: "tile" } },
+              {
+                $entity_id: "{{ state_attr(entity, 'entities') | default([], true) | to_json }}",
+                card: { type: "custom:mushroom-entity-card" },
+              },
+            ],
+          },
+        })
+        parent.hass = hass
+        document.body.append(parent)
+        await tick()
+        const parentResult = (json) =>
+          subscriptions[parentIndex].callback({
+            result: [{ entity: parentEntity, group: 0, values: [parentEntity, json] }],
+          })
+        parentResult('["sensor.b", "sensor.a"]')
+        await tick()
+        const nested = parent.shadowRoot.querySelector("auto-grid")
+        assert(
+          nested && subscriptions.length === parentIndex + 2,
+          "a real nested Auto Grid subscribes using its rendered entity lists"
+        )
+        assert(
+          subscriptions[parentIndex + 1].request.template.includes('["sensor.b","sensor.a"]') &&
+            !subscriptions[parentIndex + 1].request.template.includes("states | map"),
+          "JSON child IDs compile directly to candidates"
+        )
+        subscriptions[parentIndex + 1].callback({
+          result: [
+            { entity: parentEntity, group: 0 },
+            { entity: "sensor.b", group: 1 },
+            { entity: "sensor.a", group: 1 },
+          ],
+        })
+        await tick()
+        const nestedTiles = () => [...nested.shadowRoot.querySelectorAll("test-tile")]
+        const headerTile = nestedTiles()[0]
+        assert(
+          nestedTiles()
+            .map((tile) => tile.config.entity)
+            .join() === `${parentEntity},sensor.b,sensor.a`,
+          "nested grid keeps its header first and related entities in list order"
+        )
+        assert(
+          nestedTiles()[1].config.type === "custom:mushroom-entity-card",
+          "child entity rules keep their own card configuration"
+        )
+        parentResult("[]")
+        await tick()
+        assert(
+          parent.shadowRoot.querySelector("auto-grid") === nested,
+          "changing JSON selection reconfigures rather than recreates the nested grid"
+        )
+        assert(
+          subscriptions.length === parentIndex + 3,
+          "only the inner query changes when the JSON list changes"
+        )
+        subscriptions[parentIndex + 2].callback({ result: [{ entity: parentEntity, group: 0 }] })
+        await tick()
+        assert(
+          nestedTiles().length === 1 && nestedTiles()[0] === headerTile,
+          "an empty child list retains the existing alert header"
+        )
+        const stopsBeforeParentRemoval = stops
+        parent.remove()
+        await tick()
+        assert(
+          stops === stopsBeforeParentRemoval + 2,
+          "nested subscriptions both close when the parent disconnects"
+        )
         observer.disconnect()
         grid.remove()
         await tick()
