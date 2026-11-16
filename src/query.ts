@@ -23,12 +23,11 @@ const filterKeys = new Set([
   "hidden",
   "state",
   "name",
-  "attributes",
   "all",
   "any",
   "not",
 ])
-const sortKeys = new Set(["by", "attribute", "numeric", "reverse"])
+const sortKeys = new Set(["by", "numeric", "reverse"])
 
 function object(value: unknown, name: string): asserts value is Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -107,7 +106,9 @@ function validateFilter(filter: Filter, depth = 0): void {
   object(filter, "filter")
   if (depth > 20) throw new Error("Filters may nest at most 20 levels")
   for (const [key, value] of Object.entries(filter)) {
-    if (!filterKeys.has(key)) throw new Error(`Unknown filter rule: ${key}`)
+    if (!filterKeys.has(key) && !key.startsWith("attr."))
+      throw new Error(`Unknown filter rule: ${key}`)
+    if (key === "attr.") throw new Error("attr. requires a non-empty attribute name")
     if (["area", "floor", "device", "label", "domain", "entity_id", "device_class"].includes(key)) {
       const values = strings(value, key)
       if (key === "domain" && values.some((v) => !domain.test(v))) {
@@ -119,13 +120,8 @@ function validateFilter(filter: Filter, depth = 0): void {
       if (!Array.isArray(value)) throw new Error(`${key} must be a list of filters`)
       value.forEach((v) => validateFilter(v, depth + 1))
     } else if (key === "not") {
-      validateFilter(value as Filter, depth + 1)
-    } else if (key === "attributes") {
-      object(value, "attributes")
-      for (const [attribute, pattern] of Object.entries(value)) {
-        if (!attribute) throw new Error("Attribute names must not be empty")
-        match("value", pattern as Selection)
-      }
+      const children = Array.isArray(value) ? value : [value]
+      children.forEach((filter) => validateFilter(filter as Filter, depth + 1))
     } else {
       match("value", value as Selection)
     }
@@ -144,17 +140,15 @@ function predicate(filter: Filter, sets: Map<string, string>): string {
     } else if (key === "entity_id") {
       expressions.push(match("entity", value as Selection))
     } else if (key === "device_class") {
-      expressions.push(match("state_attr(entity, 'device_class')", value as Selection))
+      expressions.push(match(`state_attr(entity, ${literal("device_class")})`, value as Selection))
     } else if (key === "hidden") {
       expressions.push(value ? "is_hidden_entity(entity)" : "not is_hidden_entity(entity)")
     } else if (key === "state") {
       expressions.push(match("states(entity)", value as Selection))
     } else if (key === "name") {
       expressions.push(match("entity_name(entity, fallback=true)", value as Selection))
-    } else if (key === "attributes") {
-      for (const [attribute, pattern] of Object.entries(value as Record<string, Selection>)) {
-        expressions.push(match(`state_attr(entity, ${literal(attribute)})`, pattern))
-      }
+    } else if (key.startsWith("attr.")) {
+      expressions.push(match(`state_attr(entity, ${literal(key.slice(5))})`, value as Selection))
     } else if (key === "all" || key === "any") {
       expressions.push(
         join(
@@ -163,7 +157,13 @@ function predicate(filter: Filter, sets: Map<string, string>): string {
         )
       )
     } else if (key === "not") {
-      expressions.push(`not ${predicate(value as Filter, sets)}`)
+      const children = Array.isArray(value) ? value : [value]
+      expressions.push(
+        `not ${join(
+          children.map((filter) => predicate(filter as Filter, sets)),
+          "or"
+        )}`
+      )
     }
   }
   return join(expressions, "and")
@@ -204,8 +204,8 @@ function sortValue(sort: Sort, group: number): string {
       return "as_timestamp(states[entity].last_changed)"
     case "last_updated":
       return "as_timestamp(states[entity].last_updated)"
-    case "attribute":
-      return `state_attr(entity, ${literal(sort.attribute!)})`
+    default:
+      return `state_attr(entity, ${literal(sort.by.slice(5))})`
   }
 }
 
@@ -213,20 +213,11 @@ function validateSort(sort: Sort): void {
   object(sort, "sort")
   if (Object.keys(sort).some((k) => !sortKeys.has(k))) throw new Error("Unknown sort option")
   if (
-    ![
-      "include",
-      "entity_id",
-      "name",
-      "state",
-      "last_changed",
-      "last_updated",
-      "attribute",
-    ].includes(sort.by)
+    typeof sort.by !== "string" ||
+    (!["include", "entity_id", "name", "state", "last_changed", "last_updated"].includes(sort.by) &&
+      !(sort.by.startsWith("attr.") && sort.by.length > 5))
   ) {
     throw new Error("Unknown sort.by")
-  }
-  if (sort.by === "attribute" && (typeof sort.attribute !== "string" || !sort.attribute)) {
-    throw new Error("sort.attribute is required when sorting by attribute")
   }
   for (const key of ["numeric", "reverse"] as const) {
     if (sort[key] !== undefined && typeof sort[key] !== "boolean")
@@ -391,6 +382,9 @@ export function normalizeConfig(input: AutoGridConfig): GridConfig {
     square: config.square ?? false,
     show_empty: config.show_empty ?? false,
     card,
-    query: { template: compileQuery(includeFilters, excludes, sorts, config.limit), cards },
+    query: {
+      template: compileQuery(includeFilters, excludes, sorts, config.limit),
+      cards,
+    },
   }
 }

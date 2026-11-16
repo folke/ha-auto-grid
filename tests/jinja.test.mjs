@@ -57,13 +57,8 @@ test(
       ],
       [{ not: { domain: "light" } }, undefined, 2, ["sensor.low", "sensor.high"]],
       [{ domain: "sensor", state: "<20" }, undefined, undefined, ["sensor.low"]],
-      [
-        { domain: "sensor", attributes: { battery: ">= 80" } },
-        undefined,
-        undefined,
-        ["sensor.high"],
-      ],
-      [{ domain: "sensor", attributes: { present: true } }, undefined, undefined, ["sensor.low"]],
+      [{ domain: "sensor", "attr.battery": ">= 80" }, undefined, undefined, ["sensor.high"]],
+      [{ domain: "sensor", "attr.present": true }, undefined, undefined, ["sensor.low"]],
       [
         { entity_id: "light.*", name: "/^[DP]/" },
         undefined,
@@ -101,15 +96,10 @@ test(
         ["light.pool", "light.hall", "light.deck"],
       ],
       [{ domain: "light", name: "P.*" }, undefined, undefined, []],
-      [
-        { entity_id: "sensor.low", attributes: { absent: null } },
-        undefined,
-        undefined,
-        ["sensor.low"],
-      ],
+      [{ entity_id: "sensor.low", "attr.absent": null }, undefined, undefined, ["sensor.low"]],
       [
         { device: "device_id" },
-        { by: "attribute", attribute: "battery", numeric: true },
+        { by: "attr.battery", numeric: true },
         undefined,
         ["sensor.low", "sensor.high"],
       ],
@@ -283,7 +273,7 @@ test(
           include: {
             domain: "sensor",
             device_class: "battery",
-            attributes: { device_class: "temperature" },
+            "attr.device_class": "temperature",
           },
         },
         [],
@@ -440,7 +430,7 @@ test(
         [...ordered].reverse(),
       ],
       [
-        { include: { domain: "sensor" }, sort: { by: "attribute", attribute: "friendly_name" } },
+        { include: { domain: "sensor" }, sort: { by: "attr.friendly_name" } },
         [
           "sensor.energy",
           "sensor.main",
@@ -460,6 +450,135 @@ test(
             states,
             registry,
             devices,
+          }))
+        ),
+        encoding: "utf8",
+      }
+    )
+    assert.equal(output.status, 0, output.stderr)
+    JSON.parse(output.stdout).forEach((actual, i) => {
+      assert.deepEqual(
+        actual.result.map(({ entity }) => entity),
+        cases[i][1],
+        JSON.stringify(cases[i][0])
+      )
+    })
+  }
+)
+
+test(
+  "attribute notation and array NOT execute with literal-key semantics",
+  {
+    skip: python.status !== 0 ? "Optional check requires Python 3 with jinja2 installed" : false,
+  },
+  () => {
+    const odd = "x') }} {{ boom"
+    const states = {
+      "sensor.a": {
+        state: "on",
+        name: "A",
+        attributes: {
+          level: 2,
+          present: true,
+          "meta.level": 9,
+          meta: { level: 1 },
+          "battery:type": "CR2032",
+          [odd]: true,
+        },
+      },
+      "sensor.b": {
+        state: "off",
+        name: "B",
+        attributes: {
+          level: 10,
+          present: false,
+          "meta.level": 2,
+          meta: { level: 9 },
+          "battery:type": "AA",
+        },
+      },
+      "sensor.c": { state: "unavailable", name: "C" },
+      "sensor.d": {
+        state: "on",
+        name: "D",
+        attributes: { level: 3, "meta.level": 4, "battery:type": "AAA" },
+      },
+    }
+    const registry = {
+      "sensor.a": { hidden_by: "user", entity_name: "A" },
+      "sensor.c": { hidden_by: "integration", entity_name: "C" },
+    }
+    const all = Object.keys(states)
+    const cases = [
+      [
+        { include: { domain: "sensor", not: [{ hidden: true }, { state: "unavailable" }] } },
+        ["sensor.b", "sensor.d"],
+      ],
+      [
+        { include: { domain: "sensor", not: { hidden: true, state: "unavailable" } } },
+        ["sensor.a", "sensor.b", "sensor.d"],
+      ],
+      [
+        {
+          include: { domain: "sensor", not: { not: [{ hidden: true }, { state: "unavailable" }] } },
+        },
+        ["sensor.a", "sensor.c"],
+      ],
+      [{ include: { domain: "sensor", not: [] } }, all],
+      [{ include: { domain: "sensor", not: {} } }, []],
+      [{ include: { domain: "sensor", not: [{}] } }, []],
+      [
+        {
+          include: { domain: "sensor" },
+          exclude: { not: [{ hidden: true }, { state: "unavailable" }] },
+        },
+        ["sensor.a", "sensor.c"],
+      ],
+      [{ include: { domain: "sensor", "attr.level": "> 2" } }, ["sensor.b", "sensor.d"]],
+      [{ include: { domain: "sensor", "attr.present": true } }, ["sensor.a"]],
+      [{ include: { domain: "sensor", "attr.meta.level": 9 } }, ["sensor.a"]],
+      [{ include: { domain: "sensor", "attr.meta.level": 1 } }, []],
+      [
+        { include: { domain: "sensor", "attr.battery:type": ["CR2032", "AA"] } },
+        ["sensor.a", "sensor.b"],
+      ],
+      [{ include: { domain: "sensor", [`attr.${odd}`]: true } }, ["sensor.a"]],
+      [{ include: { domain: "sensor", "attr.absent": null } }, all],
+      [
+        { include: { domain: "sensor" }, sort: { by: "attr.level" } },
+        ["sensor.c", "sensor.b", "sensor.a", "sensor.d"],
+      ],
+      [
+        { include: { domain: "sensor" }, sort: { by: "attr.level", numeric: true } },
+        ["sensor.a", "sensor.d", "sensor.b", "sensor.c"],
+      ],
+      [
+        { include: { domain: "sensor" }, sort: { by: "attr.meta.level", numeric: true } },
+        ["sensor.b", "sensor.d", "sensor.a", "sensor.c"],
+      ],
+      [
+        {
+          include: { domain: "sensor" },
+          sort: [
+            { by: "include" },
+            { by: "attr.level", numeric: true, reverse: true },
+            { by: "name" },
+          ],
+        },
+        ["sensor.b", "sensor.d", "sensor.a", "sensor.c"],
+      ],
+      [{ include: { domain: "sensor" }, sort: { by: "name" } }, all],
+      [{ include: { domain: "sensor" }, sort: [{ by: "include" }, { by: "name" }] }, all],
+    ]
+    const output = spawnSync(
+      "python3",
+      [fileURLToPath(new URL("./render-template.py", import.meta.url))],
+      {
+        input: JSON.stringify(
+          cases.map(([config]) => ({
+            template: normalizeConfig(config).query.template,
+            states,
+            registry,
           }))
         ),
         encoding: "utf8",

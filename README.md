@@ -119,18 +119,18 @@ one Jinja query and subscribed through HA's `render_template` WebSocket API.
 | `label`        | Label ID/name, or a list                                             |
 | `domain`       | Exact domain name, or a list, e.g. `light`                           |
 | `entity_id`    | Exact ID, wildcard, `/regex/`, or a list                             |
-| `device_class` | Shorthand for matching `attributes.device_class`; string or list     |
+| `device_class` | Shorthand for matching `attr.device_class`; string or list           |
 | `hidden`       | Boolean; whether HA's entity registry marks the entity as hidden     |
 | `state`        | Exact value, wildcard, `/regex/`, numeric comparison, or a list      |
 | `name`         | Entity's own name, with device fallback and the same matching syntax |
-| `attributes`   | Map of attribute names to matching values                            |
+| `attr.<name>`  | Match a literal entity attribute using the same matching syntax      |
 | `all`          | List of filters, all must match                                      |
 | `any`          | List of filters, at least one must match                             |
-| `not`          | A filter that must not match                                         |
+| `not`          | A filter that must not match, or a list where none may match         |
 
 Area/floor/device/label membership uses HA's corresponding `*_entities()` helper
 semantics. An area includes entities assigned through a device. `device_class` and
-an explicit `attributes.device_class` are additional AND constraints: contradictory
+an explicit `attr.device_class` are additional AND constraints: contradictory
 values match nothing; neither overrides the other.
 
 `hidden: true` matches entities hidden by either the user or an integration.
@@ -152,7 +152,38 @@ regular expression. Globs are anchored, `*` matches any sequence, and other char
 are literal. Matching is case-sensitive. Numeric comparison strings support
 `<`, `<=`, `>`, `>=`, `=`, `==`, and `!=`; non-numeric entity values do not match these.
 Numeric YAML values compare numerically; booleans and `null` are useful for attributes.
-Attribute names are literal top-level keys, including any dots or colons.
+Everything after `attr.` is a literal attribute name, including dots and colons:
+`attr.some.integration_key` reads the attribute named `some.integration_key`, not a
+nested path. The same notation works for sorting.
+
+```yaml
+include:
+  domain: sensor
+  attr.device_class: battery
+  attr.battery_level: "< 20"
+sort:
+  - by: include
+  - by: attr.battery_level
+    numeric: true
+  - by: name
+```
+
+`not` accepts one filter or a list interpreted as `not any`. These differ:
+
+```yaml
+# Reject entities that are hidden OR unavailable
+not:
+  - hidden: true
+  - state: unavailable
+
+# Reject only entities that are BOTH hidden AND unavailable
+not:
+  hidden: true
+  state: unavailable
+```
+
+`not: []` rejects nothing; `not: {}` rejects everything. Nested `any`, `all`, and
+`not` rules work in both includes and exclusions.
 
 Quote `"on"` and `"off"` in YAML. For low batteries:
 
@@ -173,6 +204,9 @@ Raw user templates, nested attribute paths, translated-state matching, relative-
 rules, and per-group sorting/pagination are not implemented. Unknown filter rules
 are rejected. The earlier `filter`, `entities`, and `options` fields have been replaced
 by `include`/`exclude` and `card`; old configurations produce a migration error.
+The previous `attributes: { battery: ... }` notation is now `attr.battery: ...`;
+`sort: { by: attribute, attribute: battery }` is now `sort: { by: attr.battery }`
+(add `numeric: true` for numeric ordering).
 
 ## Sorting and limits
 
@@ -204,8 +238,8 @@ sort:
 ```
 
 Supported `by` values: `include` (winning include group's index), `entity_id`, `name`,
-`state`, `last_changed`, `last_updated`, and `attribute` (requires `attribute: battery`,
-for example). Each sort has independent `numeric` and `reverse` flags. Include and
+`state`, `last_changed`, `last_updated`, and `attr.<name>` (for example, `attr.battery`).
+Use an object to set independent `numeric` and `reverse` flags for each sort. Include and
 timestamp sorts are numeric automatically. String sorts are case-insensitive.
 Missing/non-numeric values in numeric sorts go last in either direction.
 

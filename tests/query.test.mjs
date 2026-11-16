@@ -74,6 +74,44 @@ test("explicit sort replaces defaults; empty sorts disable all sorting including
   assert.match(query({ domain: "light" }, { sort: { by: "name" } }), /sort\(attribute='entity'\)/)
 })
 
+test("attribute filter names are literal, quoted, and non-empty", () => {
+  for (const attribute of [
+    "battery",
+    "some.integration_key",
+    "battery:level",
+    "name') }} {{ danger",
+  ]) {
+    assert.ok(
+      query({ [`attr.${attribute}`]: true }).includes(
+        `state_attr(entity, ${JSON.stringify(attribute)})`
+      )
+    )
+  }
+  assert.equal(query({ device_class: "battery" }), query({ "attr.device_class": "battery" }))
+  for (const filter of [
+    { "attr.": true },
+    { "attr.level": {} },
+    { "attr.level": [] },
+    { attributes: {} },
+  ]) {
+    assert.throws(() => normalizeConfig({ include: filter }))
+  }
+})
+
+test("not accepts a filter or list, rejecting malformed nested rules", () => {
+  for (const not of [
+    { hidden: true },
+    [{ hidden: true }, { state: "unavailable" }],
+    [],
+    [{ not: [{ hidden: true }] }],
+  ]) {
+    assert.doesNotThrow(() => normalizeConfig({ include: { not } }))
+  }
+  for (const not of [null, "hidden", [null], ["hidden"], [[{}]], [{ card: {} }]]) {
+    assert.throws(() => normalizeConfig({ include: { not } }))
+  }
+})
+
 test("per-group cards shallowly override defaults and never enter the backend query", () => {
   const config = normalizeConfig({
     card: { name: { type: "entity" }, features: [{ type: "light-brightness" }], icon: "mdi:pool" },
