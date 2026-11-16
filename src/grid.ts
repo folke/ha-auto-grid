@@ -1,11 +1,12 @@
-import { normalizeEntities } from "./query.ts"
+import { normalizeMatches } from "./query.ts"
 import { subscribeTemplate } from "./subscriptions.ts"
-import type { CardConfig, GridConfig, HomeAssistant, LovelaceCard } from "./types.ts"
+import type { CardConfig, GridConfig, HomeAssistant, LovelaceCard, QueryMatch } from "./types.ts"
 
 type CreateCard = (config: CardConfig) => Promise<LovelaceCard>
+type GridCard = QueryMatch & { card: LovelaceCard; configKey: string }
 
 export class GridController {
-  cards: { entity: string; card: LovelaceCard }[] = []
+  cards: GridCard[] = []
   loading = true
   error?: string
 
@@ -14,8 +15,9 @@ export class GridController {
   private active = false
   private dispose?: () => void
   private revision = 0
-  private selection?: string[]
-  private cache = new Map<string, LovelaceCard>()
+  private subscriptionToken = 0
+  private selection?: QueryMatch[]
+  private cache = new Map<string, GridCard>()
   private create: CreateCard
   private changed: () => void
 
@@ -25,16 +27,14 @@ export class GridController {
   }
 
   configure(config: GridConfig): void {
-    const queryChanged =
-      this.config?.template !== config.template ||
-      JSON.stringify(this.config?.entities) !== JSON.stringify(config.entities)
-    const optionsChanged = JSON.stringify(this.config?.options) !== JSON.stringify(config.options)
+    const queryChanged = this.config?.query.template !== config.query.template
+    const cardsChanged =
+      JSON.stringify(this.config?.query.cards) !== JSON.stringify(config.query.cards)
     this.config = config
-    if (optionsChanged) this.cache.clear()
     if (queryChanged) {
       this.selection = undefined
       this.restart()
-    } else if (optionsChanged && this.selection && this.active && this.hass) {
+    } else if (cardsChanged && this.selection && this.active && this.hass) {
       void this.select(this.selection)
     } else {
       this.changed()
@@ -77,49 +77,55 @@ export class GridController {
     this.loading = true
     this.error = undefined
     this.changed()
-    if (this.config.entities) {
-      void this.select(this.config.entities)
-    } else {
-      this.dispose = subscribeTemplate(this.hass.connection, this.config.template!, {
-        result: (value) => {
-          if (this.active && this.subscriptionToken === token) void this.select(value)
-        },
-        error: (error) => {
-          if (this.active && this.subscriptionToken === token) this.fail(error)
-        },
-      })
-    }
+    this.dispose = subscribeTemplate(this.hass.connection, this.config.query.template, {
+      result: (value) => {
+        if (this.active && this.subscriptionToken === token) void this.select(value)
+      },
+      error: (error) => {
+        if (this.active && this.subscriptionToken === token) this.fail(error)
+      },
+    })
   }
-
-  private subscriptionToken = 0
 
   private async select(value: unknown): Promise<void> {
     const revision = ++this.revision
     try {
-      const ids = normalizeEntities(value)
-      this.selection = ids
-      if (
-        ids.length === this.cards.length &&
-        ids.every((id, i) => id === this.cards[i].entity) &&
-        ids.every((id) => this.cache.has(id))
-      ) {
+      const matches = normalizeMatches(value, this.config!.query.cards.length)
+      this.selection = matches
+      const requests = matches.map((match) => {
+        const config = this.config!.query.cards[match.group]
+        return { ...match, config, configKey: JSON.stringify(config) }
+      })
+      const unchanged =
+        requests.length === this.cards.length &&
+        requests.every(
+          (request, i) =>
+            request.entity === this.cards[i].entity && request.configKey === this.cards[i].configKey
+        )
+      if (unchanged) {
         const changed = this.loading || this.error !== undefined
         this.loading = false
         this.error = undefined
+        // A different include can have the same effective card configuration.
+        this.cards.forEach((card, i) => {
+          card.group = matches[i].group
+        })
         if (changed) this.changed()
         return
       }
-      const options = this.config!.options
       const cards = await Promise.all(
-        ids.map(async (entity) => {
+        requests.map(async ({ entity, group, config, configKey }) => {
           const existing = this.cache.get(entity)
-          const card = existing ?? (await this.create({ ...structuredClone(options), entity }))
-          return { entity, card }
+          const card =
+            existing?.configKey === configKey
+              ? existing.card
+              : await this.create({ ...structuredClone(config), entity })
+          return { entity, group, card, configKey }
         })
       )
       if (!this.active || revision !== this.revision) return
       for (const { card } of cards) card.hass = this.hass!
-      this.cache = new Map(cards.map(({ entity, card }) => [entity, card]))
+      this.cache = new Map(cards.map((entry) => [entry.entity, entry]))
       this.cards = cards
       this.loading = false
       this.error = undefined

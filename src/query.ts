@@ -1,4 +1,14 @@
-import type { AutoGridConfig, Filter, GridConfig, Pattern, Selection, Sort } from "./types.ts"
+import type {
+  AutoGridConfig,
+  CardConfig,
+  Filter,
+  GridConfig,
+  Include,
+  Pattern,
+  QueryMatch,
+  Selection,
+  Sort,
+} from "./types.ts"
 
 const entityId = /^[a-z0-9_]+\.[a-z0-9_]+$/
 const domain = /^[a-z0-9_]+$/
@@ -9,6 +19,7 @@ const filterKeys = new Set([
   "label",
   "domain",
   "entity_id",
+  "device_class",
   "state",
   "name",
   "attributes",
@@ -96,7 +107,7 @@ function validateFilter(filter: Filter, depth = 0): void {
   if (depth > 20) throw new Error("Filters may nest at most 20 levels")
   for (const [key, value] of Object.entries(filter)) {
     if (!filterKeys.has(key)) throw new Error(`Unknown filter rule: ${key}`)
-    if (["area", "floor", "device", "label", "domain", "entity_id"].includes(key)) {
+    if (["area", "floor", "device", "label", "domain", "entity_id", "device_class"].includes(key)) {
       const values = strings(value, key)
       if (key === "domain" && values.some((v) => !domain.test(v))) {
         throw new Error("domain must contain valid domain names, not patterns")
@@ -129,6 +140,8 @@ function predicate(filter: Filter, sets: Map<string, string>): string {
       expressions.push(`entity.split('.')[0] in ${JSON.stringify(strings(value, key))}`)
     } else if (key === "entity_id") {
       expressions.push(match("entity", value as Selection))
+    } else if (key === "device_class") {
+      expressions.push(match("state_attr(entity, 'device_class')", value as Selection))
     } else if (key === "state") {
       expressions.push(match("states(entity)", value as Selection))
     } else if (key === "name") {
@@ -172,8 +185,10 @@ function candidates(filter: Filter): string {
   return "states | map(attribute='entity_id') | list"
 }
 
-function sortValue(sort: Sort): string {
+function sortValue(sort: Sort, group: number): string {
   switch (sort.by) {
+    case "include":
+      return String(group)
     case "entity_id":
       return "entity"
     case "name":
@@ -193,7 +208,15 @@ function validateSort(sort: Sort): void {
   object(sort, "sort")
   if (Object.keys(sort).some((k) => !sortKeys.has(k))) throw new Error("Unknown sort option")
   if (
-    !["entity_id", "name", "state", "last_changed", "last_updated", "attribute"].includes(sort.by)
+    ![
+      "include",
+      "entity_id",
+      "name",
+      "state",
+      "last_changed",
+      "last_updated",
+      "attribute",
+    ].includes(sort.by)
   ) {
     throw new Error("Unknown sort.by")
   }
@@ -206,57 +229,120 @@ function validateSort(sort: Sort): void {
   }
 }
 
-function finishTemplate(source: string, condition: string, sort?: Sort, limit?: number): string {
-  if (sort) validateSort(sort)
-  const value = sort ? sortValue(sort) : "entity"
-  const numeric = sort?.numeric || sort?.by === "last_changed" || sort?.by === "last_updated"
-  const prepared = numeric ? `(${value} | float(none))` : `(${value} | default('', true) | string)`
-  const lines = [
-    "{% set ns = namespace(rows=[]) %}",
-    `{% for entity in (${source}) | unique | list %}`,
-    `{% if states[entity] is defined and states[entity] is not none and ${condition} %}`,
-    `{% set ns.rows = ns.rows + [{'entity': entity, 'value': ${prepared}}] %}`,
-    "{% endif %}",
-    "{% endfor %}",
-  ]
-  if (sort) {
-    // Missing/non-numeric values stay last in either direction.
-    lines.push(
-      "{% set valid = ns.rows | rejectattr('value', 'none') | list %}",
-      "{% set missing = ns.rows | selectattr('value', 'none') | list %}",
-      `{% set ns.rows = (valid | sort(attribute='value', reverse=${sort.reverse ? "true" : "false"})) + missing %}`
-    )
+const defaultSort: Sort[] = [{ by: "include" }, { by: "name" }]
+
+function numericSort(sort: Sort): boolean {
+  return sort.numeric === true || ["include", "last_changed", "last_updated"].includes(sort.by)
+}
+
+function compileQuery(
+  includes: Filter[],
+  excludes: Filter[],
+  sorts: Sort[],
+  limit?: number
+): string {
+  const sets = new Map<string, string>()
+  const exclusion = join(
+    excludes.map((filter) => predicate(filter, sets)),
+    "or"
+  )
+  const groups = includes.map((filter, group) => {
+    const condition = predicate(filter, sets)
+    const source = candidates(filter)
+    const values = sorts.map((sort, index) => {
+      const value = sortValue(sort, group)
+      const prepared = numericSort(sort)
+        ? `(${value} | float(none))`
+        : `(${value} | default('', true) | string)`
+      return `'sort${index}': ${prepared}`
+    })
+    const fields = [`'entity': entity`, `'group': ${group}`, ...values].join(", ")
+    return [
+      `{% for entity in (${sets.get(source) ?? source}) | unique | list %}`,
+      `{% if entity not in ns.seen and states[entity] is defined and states[entity] is not none and ${condition} and not ${exclusion} %}`,
+      `{% set ns.seen = ns.seen + [entity] %}`,
+      `{% set ns.rows = ns.rows + [{${fields}}] %}`,
+      "{% endif %}",
+      "{% endfor %}",
+    ].join("\n")
+  })
+  const lines = [...sets].map(([expression, name]) => `{% set ${name} = ${expression} %}`)
+  lines.push("{% set ns = namespace(rows=[], seen=[]) %}", ...groups)
+  if (sorts.length) {
+    // Stable least-significant-first sorts preserve higher-priority keys and deterministic ties.
+    lines.push("{% set ns.rows = ns.rows | sort(attribute='entity') %}")
+    for (let i = sorts.length - 1; i >= 0; i--) {
+      const sort = sorts[i]
+      if (numericSort(sort)) {
+        lines.push(
+          `{% set valid = ns.rows | rejectattr('sort${i}', 'none') | list %}`,
+          `{% set missing = ns.rows | selectattr('sort${i}', 'none') | list %}`,
+          `{% set ns.rows = (valid | sort(attribute='sort${i}', reverse=${sort.reverse ? "true" : "false"})) + missing %}`
+        )
+      } else {
+        lines.push(
+          `{% set ns.rows = ns.rows | sort(attribute='sort${i}', reverse=${sort.reverse ? "true" : "false"}) %}`
+        )
+      }
+    }
   }
+  // Only the winning group and ID cross the wire; sort values and card configuration stay local.
   lines.push(
-    "{% set result = ns.rows | map(attribute='entity') | list %}",
-    limit === undefined ? "{{ result }}" : `{{ result[:${limit}] }}`
+    "{% set result = namespace(rows=[]) %}",
+    `{% for row in ns.rows${limit === undefined ? "" : `[:${limit}]`} %}`,
+    "{% set result.rows = result.rows + [{'entity': row.entity, 'group': row.group}] %}",
+    "{% endfor %}",
+    "{{ result.rows }}"
   )
   return lines.join("\n")
 }
 
-export function compileFilter(filter: Filter, sort?: Sort, limit?: number): string {
-  validateFilter(filter)
-  const sets = new Map<string, string>()
-  const condition = predicate(filter, sets)
-  const source = candidates(filter)
-  const bindings = [...sets].map(([expression, name]) => `{% set ${name} = ${expression} %}`)
-  return [...bindings, finishTemplate(sets.get(source) ?? source, condition, sort, limit)].join(
-    "\n"
-  )
+export function normalizeMatches(value: unknown, groupCount: number): QueryMatch[] {
+  if (!Array.isArray(value))
+    throw new Error("The entity query must return a list of entity/group matches")
+  const seen = new Set<string>()
+  const matches: QueryMatch[] = []
+  for (const row of value) {
+    object(row, "Query match")
+    if (
+      typeof row.entity !== "string" ||
+      !entityId.test(row.entity) ||
+      typeof row.group !== "number" ||
+      !Number.isInteger(row.group) ||
+      row.group < 0 ||
+      row.group >= groupCount
+    ) {
+      throw new Error("Invalid entity ID or include group in query result")
+    }
+    if (!seen.has(row.entity)) {
+      seen.add(row.entity)
+      matches.push({ entity: row.entity, group: row.group })
+    }
+  }
+  return matches
 }
 
-export function normalizeEntities(result: unknown): string[] {
-  if (!Array.isArray(result) || result.some((v) => typeof v !== "string" || !entityId.test(v))) {
-    throw new Error(
-      "The entity query must return a list of entity IDs, not card configurations or text"
-    )
+function filters<T extends Filter>(value: T | T[], name: string): T[] {
+  const result = Array.isArray(value) ? value : [value]
+  for (const filter of result) object(filter, name)
+  return result
+}
+
+function validateCard(card: unknown): asserts card is Partial<CardConfig> {
+  object(card, "card")
+  if ("entity" in card) throw new Error("card.entity is supplied by the query")
+  if ("type" in card && (typeof card.type !== "string" || !card.type.trim())) {
+    throw new Error("card.type must be a non-empty string")
   }
-  return [...new Set(result as string[])]
 }
 
 export function normalizeConfig(input: AutoGridConfig): GridConfig {
   object(input, "Auto Grid configuration")
   const config = structuredClone(input)
+  for (const old of ["filter", "entities", "options"]) {
+    if (old in config)
+      throw new Error(`${old} is no longer supported; use include/exclude and card`)
+  }
   if (config.columns !== undefined && (!Number.isInteger(config.columns) || config.columns < 1)) {
     throw new Error("columns must be a positive integer")
   }
@@ -267,39 +353,35 @@ export function normalizeConfig(input: AutoGridConfig): GridConfig {
     if (config[key] !== undefined && typeof config[key] !== "boolean")
       throw new Error(`${key} must be a boolean`)
   }
-  if ((config.entities !== undefined) === (config.filter !== undefined)) {
-    throw new Error("Specify exactly one of entities or filter")
+  if (config.include === undefined) throw new Error("include is required")
+  const includes = filters<Include>(config.include, "include")
+  const excludes = config.exclude === undefined ? [] : filters(config.exclude, "exclude")
+  const card: CardConfig = { type: "tile" }
+  if (config.card !== undefined) {
+    validateCard(config.card)
+    Object.assign(card, config.card)
   }
-  if (config.options !== undefined) object(config.options, "options")
-  if (config.options?.entity !== undefined)
-    throw new Error("options.entity is supplied by the query")
-  if (
-    config.options?.type !== undefined &&
-    (typeof config.options.type !== "string" || !config.options.type)
-  ) {
-    throw new Error("options.type must be a non-empty string")
-  }
-  const result: GridConfig = {
+  const includeFilters: Filter[] = []
+  const cards = includes.map((include) => {
+    const { card: override, ...filter } = include
+    validateFilter(filter)
+    includeFilters.push(filter)
+    if (override !== undefined) validateCard(override)
+    return { ...card, ...override }
+  })
+  excludes.forEach((exclude) => validateFilter(exclude))
+  const sorts =
+    config.sort === undefined
+      ? defaultSort
+      : Array.isArray(config.sort)
+        ? config.sort
+        : [config.sort]
+  sorts.forEach(validateSort)
+  return {
     columns: config.columns ?? 2,
     square: config.square ?? false,
     show_empty: config.show_empty ?? false,
-    options: { type: "tile", ...config.options },
+    card,
+    query: { template: compileQuery(includeFilters, excludes, sorts, config.limit), cards },
   }
-  if (config.filter !== undefined) {
-    result.template = compileFilter(config.filter, config.sort, config.limit)
-  } else if (typeof config.entities === "string") {
-    if (!config.entities.includes("{{") && !config.entities.includes("{%")) {
-      throw new Error("entities must be a Jinja template or a list of entity IDs")
-    }
-    if (config.sort !== undefined || config.limit !== undefined) {
-      throw new Error("For a custom template, apply sorting and limits inside the template")
-    }
-    result.template = config.entities
-  } else {
-    const entities = normalizeEntities(config.entities)
-    if (config.sort)
-      result.template = finishTemplate(JSON.stringify(entities), "true", config.sort, config.limit)
-    else result.entities = config.limit === undefined ? entities : entities.slice(0, config.limit)
-  }
-  return result
 }

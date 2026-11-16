@@ -2,7 +2,10 @@ import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
 import { test } from "node:test"
-import { compileFilter } from "../src/query.ts"
+import { normalizeConfig } from "../src/query.ts"
+
+const compileFilter = (include, sort, limit) =>
+  normalizeConfig({ include, sort: sort ?? [], limit }).query.template
 
 const python = spawnSync("python3", ["-c", "import jinja2"], { encoding: "utf8" })
 test(
@@ -114,7 +117,7 @@ test(
         { domain: "light" },
         { by: "last_updated" },
         undefined,
-        ["light.pool", "light.hall", "light.deck"],
+        ["light.deck", "light.hall", "light.pool"],
       ],
     ]
     const payload = cases.map(([filter, sort, limit]) => ({
@@ -134,11 +137,195 @@ test(
     JSON.parse(result.stdout).forEach((actual, index) => {
       assert.deepEqual(
         actual.result,
-        cases[index][3],
+        cases[index][3].map((entity) => ({ entity, group: 0 })),
         `case ${index}: ${JSON.stringify(cases[index][0])}`
       )
       for (const calls of Object.values(actual.calls))
         assert.equal(calls, 1, "registry helpers are hoisted")
     })
+  }
+)
+
+test(
+  "include/exclude groups and prioritized sorts execute with agreed semantics",
+  {
+    skip: python.status !== 0 ? "Optional check requires Python 3 with jinja2 installed" : false,
+  },
+  () => {
+    const states = {
+      "light.z": { state: "on", name: "Same", attributes: { device_class: "light" } },
+      "light.a": { state: "off", name: "same", attributes: { device_class: "light" } },
+      "sensor.z": { state: "12", name: "A", attributes: { device_class: "battery" } },
+      "sensor.a": { state: "3", name: "Z", attributes: { device_class: "temperature" } },
+      "sensor.missing": { state: "unavailable", name: "0" },
+    }
+    const row = (entity, group = 0) => ({ entity, group })
+    const groups = [{ domain: "light" }, { domain: "sensor" }]
+    const cases = [
+      [
+        "default include/name, with entity-ID fallback",
+        { include: groups },
+        [
+          row("light.a"),
+          row("light.z"),
+          row("sensor.missing", 1),
+          row("sensor.z", 1),
+          row("sensor.a", 1),
+        ],
+      ],
+      [
+        "explicit name replaces include grouping",
+        { include: groups, sort: { by: "name" } },
+        [
+          row("sensor.missing", 1),
+          row("sensor.z", 1),
+          row("light.a"),
+          row("light.z"),
+          row("sensor.a", 1),
+        ],
+      ],
+      [
+        "empty sort preserves group and candidate order",
+        { include: groups, sort: [] },
+        [
+          row("light.z"),
+          row("light.a"),
+          row("sensor.z", 1),
+          row("sensor.a", 1),
+          row("sensor.missing", 1),
+        ],
+      ],
+      [
+        "first matching group owns duplicates",
+        { include: [{ entity_id: "light.z" }, ...groups] },
+        [
+          row("light.z"),
+          row("light.a", 1),
+          row("sensor.missing", 2),
+          row("sensor.z", 2),
+          row("sensor.a", 2),
+        ],
+      ],
+      [
+        "global exclusion applies to all groups",
+        { include: groups, exclude: [{ state: "unavailable" }, { entity_id: "light.z" }] },
+        [row("light.a"), row("sensor.z", 1), row("sensor.a", 1)],
+      ],
+      [
+        "local NOT doesn't exclude a later group's matches",
+        { include: [{ domain: "light", not: { state: "on" } }, { domain: "light" }] },
+        [row("light.a"), row("light.z", 1)],
+      ],
+      [
+        "global exclusions cannot be overridden",
+        {
+          include: [{ entity_id: "light.z" }, { domain: "light" }],
+          exclude: { entity_id: "light.z" },
+        },
+        [row("light.a", 1)],
+      ],
+      [
+        "include then numeric state, unavailable last",
+        { include: groups, sort: [{ by: "include" }, { by: "state", numeric: true }] },
+        [
+          row("light.a"),
+          row("light.z"),
+          row("sensor.a", 1),
+          row("sensor.z", 1),
+          row("sensor.missing", 1),
+        ],
+      ],
+      [
+        "reverse numeric preserves missing-last and group priority",
+        {
+          include: groups,
+          sort: [{ by: "include" }, { by: "state", numeric: true, reverse: true }],
+        },
+        [
+          row("light.a"),
+          row("light.z"),
+          row("sensor.z", 1),
+          row("sensor.a", 1),
+          row("sensor.missing", 1),
+        ],
+      ],
+      [
+        "reverse include order",
+        { include: groups, sort: [{ by: "include", reverse: true }, { by: "name" }] },
+        [
+          row("sensor.missing", 1),
+          row("sensor.z", 1),
+          row("sensor.a", 1),
+          row("light.a"),
+          row("light.z"),
+        ],
+      ],
+      [
+        "limit after global exclusion and deduplication",
+        { include: [{ domain: "light" }, {}], exclude: { entity_id: "light.a" }, limit: 2 },
+        [row("light.z"), row("sensor.missing", 1)],
+      ],
+      ["zero limit", { include: groups, limit: 0 }, []],
+      ["empty include", { include: [] }, []],
+      [
+        "empty exclusion list",
+        { include: { entity_id: "light.z" }, exclude: [] },
+        [row("light.z")],
+      ],
+      [
+        "device class shorthand",
+        { include: { domain: "sensor", device_class: "battery" } },
+        [row("sensor.z")],
+      ],
+      [
+        "contradictory device class constraints are ANDed",
+        {
+          include: {
+            domain: "sensor",
+            device_class: "battery",
+            attributes: { device_class: "temperature" },
+          },
+        },
+        [],
+      ],
+      [
+        "class list",
+        { include: { domain: "sensor", device_class: ["battery", "temperature"] } },
+        [row("sensor.z"), row("sensor.a")],
+      ],
+      [
+        "global nested exclusion",
+        {
+          include: groups,
+          exclude: { any: [{ device_class: "battery" }, { not: { domain: "sensor" } }] },
+        },
+        [row("sensor.missing", 1), row("sensor.a", 1)],
+      ],
+    ]
+    const many = Object.fromEntries(
+      Array.from({ length: 12 }, (_, i) => [`sensor.group_${i}`, { state: "0", name: "Same" }])
+    )
+    const manyIncludes = Object.keys(many).map((entity_id) => ({ entity_id }))
+    const payload = cases.map(([, config]) => ({
+      template: normalizeConfig(config).query.template,
+      states,
+    }))
+    payload.push({
+      template: normalizeConfig({ include: manyIncludes }).query.template,
+      states: many,
+    })
+    const output = spawnSync(
+      "python3",
+      [fileURLToPath(new URL("./render-template.py", import.meta.url))],
+      { input: JSON.stringify(payload), encoding: "utf8" }
+    )
+    assert.equal(output.status, 0, output.stderr)
+    const results = JSON.parse(output.stdout)
+    cases.forEach(([name, , expected], i) => assert.deepEqual(results[i].result, expected, name))
+    assert.deepEqual(
+      results.at(-1).result,
+      Object.keys(many).map((entity, group) => row(entity, group)),
+      "include sorting is numeric, not lexicographic"
+    )
   }
 )

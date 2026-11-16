@@ -34,6 +34,7 @@ export interface Filter {
   label?: string | string[]
   domain?: string | string[]
   entity_id?: string | string[]
+  device_class?: string | string[] // short-hand for attributes.device_class
   state?: Selection
   name?: Selection
   attributes?: Record<string, Selection>
@@ -42,8 +43,11 @@ export interface Filter {
   not?: Filter
 }
 
+export type Include = Filter & { card?: Partial<CardConfig> }
+export type Exclude = Filter
+
 export interface Sort {
-  by: "entity_id" | "name" | "state" | "last_changed" | "last_updated" | "attribute"
+  by: "include" | "entity_id" | "name" | "state" | "last_changed" | "last_updated" | "attribute"
   attribute?: string
   numeric?: boolean
   reverse?: boolean
@@ -54,21 +58,30 @@ export interface AutoGridConfig {
   columns?: number
   square?: boolean
   show_empty?: boolean
-  options?: Partial<CardConfig>
-  entities?: string | string[]
-  filter?: Filter
-  sort?: Sort
+  card?: Partial<CardConfig>
+  include: Include | Include[]
+  exclude?: Exclude | Exclude[]
+  sort?: Sort | Sort[]
   limit?: number
   [key: string]: unknown
+}
+
+export interface QueryMatch {
+  entity: string
+  group: number
+}
+
+export interface CompiledQuery {
+  template: string
+  cards: CardConfig[]
 }
 
 export interface GridConfig {
   columns: number
   square: boolean
   show_empty: boolean
-  options: CardConfig
-  entities?: string[]
-  template?: string
+  card: CardConfig
+  query: CompiledQuery
 }
 
 export interface CardHelpers {

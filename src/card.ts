@@ -34,7 +34,7 @@ export class AutoGrid extends LitElement {
   )
 
   static getStubConfig(): AutoGridConfig {
-    return { columns: 2, filter: { domain: "light" }, options: { type: "tile" } }
+    return { columns: 2, include: { domain: "light" }, card: { type: "tile" } }
   }
 
   setConfig(config: AutoGridConfig): void {

@@ -1,121 +1,172 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { compileFilter, normalizeConfig, normalizeEntities } from "../src/query.ts"
+import { normalizeConfig, normalizeMatches } from "../src/query.ts"
 
-test("defaults to two columns of native tiles, without mutating caller config", () => {
-  const input = { filter: { area: "pool", domain: "light" }, options: { name: { type: "entity" } } }
+const query = (include, extra = {}) => normalizeConfig({ include, ...extra }).query.template
+
+test("defaults to two columns of tiles and include/name sorting without mutating input", () => {
+  const input = { include: { area: "pool", domain: "light" }, card: { name: { type: "entity" } } }
   const original = structuredClone(input)
   const config = normalizeConfig(input)
   assert.equal(config.columns, 2)
   assert.equal(config.square, false)
   assert.equal(config.show_empty, false)
-  assert.equal(normalizeConfig({ entities: [], show_empty: true }).show_empty, true)
-  assert.deepEqual(config.options, { type: "tile", name: { type: "entity" } })
-  config.options.name.type = "device"
+  assert.equal(normalizeConfig({ include: [], show_empty: true }).show_empty, true)
+  assert.deepEqual(config.card, { type: "tile", name: { type: "entity" } })
+  assert.match(config.query.template, /sort0/)
+  assert.match(config.query.template, /states\[entity\].name/)
+  config.card.name.type = "device"
   assert.deepEqual(input, original)
 })
 
-test("area queries restrict candidates and hoist registry helpers outside the entity loop", () => {
-  const query = compileFilter({ area: "pool", domain: "light", state: "on" })
-  assert.equal(query.match(/area_entities\("pool"\)/g).length, 1)
-  assert.match(query, /for entity in \(ag_members_0\)/)
-  assert.doesNotMatch(query, /states \| map/)
+test("area queries restrict candidates and hoist shared registry helpers", () => {
+  const template = query(
+    [
+      { area: "pool", domain: "light" },
+      { area: "pool", domain: "switch" },
+    ],
+    { exclude: { area: "pool", state: "unavailable" } }
+  )
+  assert.equal(template.match(/area_entities\("pool"\)/g).length, 1)
+  assert.match(template, /for entity in \(ag_members_0\)/)
+  assert.doesNotMatch(template, /states \| map/)
 })
 
 test("domain queries avoid iterating all states", () => {
-  const query = compileFilter({ domain: ["light", "switch"] })
-  assert.match(query, /states.light/)
-  assert.match(query, /states.switch/)
-  assert.doesNotMatch(query, /states \| map/)
+  const template = query({ domain: ["light", "switch"] })
+  assert.match(template, /states.light/)
+  assert.match(template, /states.switch/)
+  assert.doesNotMatch(template, /states \| map/)
 })
 
 test("AND constraints can restrict candidates, but OR and NOT cannot", () => {
   assert.match(
-    compileFilter({ all: [{ area: "pool" }, { state: "on" }] }),
+    query({ all: [{ area: "pool" }, { state: "on" }] }),
     /for entity in \(ag_members_0\)/
   )
-  assert.match(compileFilter({ any: [{ area: "pool" }, { domain: "light" }] }), /states \| map/)
-  assert.match(compileFilter({ not: { domain: "light" } }), /states \| map/)
+  assert.match(query({ any: [{ area: "pool" }, { domain: "light" }] }), /states \| map/)
+  assert.match(query({ not: { domain: "light" } }), /states \| map/)
 })
 
 test("literal entity IDs avoid a full state scan; wildcard IDs don't", () => {
-  assert.doesNotMatch(compileFilter({ entity_id: ["light.pool", "light.hall"] }), /states \| map/)
-  assert.match(compileFilter({ entity_id: "light.*" }), /states \| map/)
+  assert.doesNotMatch(query({ entity_id: ["light.pool", "light.hall"] }), /states \| map/)
+  assert.match(query({ entity_id: "light.*" }), /states \| map/)
 })
 
-test("template input remains a template, static lists are deduplicated", () => {
-  assert.equal(
-    normalizeConfig({ entities: "{{ area_entities('pool') }}" }).template,
-    "{{ area_entities('pool') }}"
+test("explicit sort replaces defaults; empty sorts disable all sorting including tie-breaker", () => {
+  assert.doesNotMatch(
+    query({ domain: "light" }, { sort: { by: "state" } }),
+    /states\[entity\].name/
   )
-  assert.deepEqual(normalizeConfig({ entities: ["light.pool", "light.pool"] }).entities, [
-    "light.pool",
-  ])
-  assert.deepEqual(normalizeConfig({ entities: ["light.pool"], limit: 0 }).entities, [])
-  assert.match(
-    normalizeConfig({ entities: ["light.pool"], sort: { by: "name" } }).template,
-    /sort\(/
-  )
+  assert.doesNotMatch(query({ domain: "light" }, { sort: [] }), /sort\(/)
+  assert.match(query({ domain: "light" }, { sort: { by: "name" } }), /sort\(attribute='entity'\)/)
 })
 
-test("validates query results without interpreting arbitrary strings or configurations", () => {
-  assert.deepEqual(normalizeEntities(["light.pool", "light.pool", "sensor.power"]), [
-    "light.pool",
-    "sensor.power",
-  ])
+test("per-group cards shallowly override defaults and never enter the backend query", () => {
+  const config = normalizeConfig({
+    card: { name: { type: "entity" }, features: [{ type: "light-brightness" }], icon: "mdi:pool" },
+    include: [
+      { domain: "light", card: { type: "button", name: { type: "device" }, features: [] } },
+      { domain: "switch" },
+    ],
+  })
+  assert.deepEqual(config.query.cards[0], {
+    type: "button",
+    name: { type: "device" },
+    features: [],
+    icon: "mdi:pool",
+  })
+  assert.deepEqual(config.query.cards[1], {
+    type: "tile",
+    name: { type: "entity" },
+    features: [{ type: "light-brightness" }],
+    icon: "mdi:pool",
+  })
+  assert.doesNotMatch(config.query.template, /mdi:pool|light-brightness|button/)
+})
+
+test("validates backend matches and defensively preserves the first duplicate", () => {
+  assert.deepEqual(
+    normalizeMatches(
+      [
+        { entity: "light.pool", group: 0 },
+        { entity: "light.pool", group: 1 },
+      ],
+      2
+    ),
+    [{ entity: "light.pool", group: 0 }]
+  )
   for (const invalid of [
     undefined,
     "light.pool",
-    "['light.pool']",
-    [{ entity: "light.pool" }],
-    ["bad"],
+    ["light.pool"],
     [null],
+    [{ entity: "bad", group: 0 }],
+    [{ entity: "light.pool" }],
+    [{ entity: "light.pool", group: -1 }],
+    [{ entity: "light.pool", group: 2 }],
+    [{ entity: "light.pool", group: 0.5 }],
   ]) {
-    assert.throws(() => normalizeEntities(invalid), /list of entity IDs/)
+    assert.throws(() => normalizeMatches(invalid, 2))
   }
 })
 
 test("invalid configuration is rejected early", () => {
   for (const config of [
     {},
-    { filter: {}, entities: [] },
-    { entities: "light.pool" },
-    { entities: [], columns: 0 },
-    { entities: [], columns: 1.5 },
-    { entities: [], square: "false" },
-    { entities: [], show_empty: "false" },
-    { entities: [], options: { entity: "light.pool" } },
-    { entities: [], options: { type: 3 } },
-    { entities: [], options: [] },
-    { filter: { typo: "pool" } },
-    { filter: { domain: "light.*" } },
-    { filter: { area: [] } },
-    { filter: { any: {} } },
-    { filter: { state: {} } },
-    { filter: { attributes: [] } },
-    { filter: { state: [] } },
-    { filter: {}, sort: { by: "nope" } },
-    { filter: {}, sort: { by: "attribute" } },
-    { filter: {}, sort: { by: "name", reverse: "false" } },
-    { filter: {}, limit: -1 },
-    { entities: "{{ [] }}", sort: { by: "name" } },
+    { exclude: {} },
+    { filter: {} },
+    { entities: [] },
+    { include: {}, options: {} },
+    { include: {}, columns: 0 },
+    { include: {}, columns: 1.5 },
+    { include: {}, square: "false" },
+    { include: {}, show_empty: "false" },
+    { include: {}, card: { entity: "light.pool" } },
+    { include: {}, card: { entity: null } },
+    { include: {}, card: { type: 3 } },
+    { include: {}, card: [] },
+    { include: { domain: "light", card: { entity: "light.pool" } } },
+    { include: { typo: "pool" } },
+    { include: { domain: "light.*" } },
+    { include: { area: [] } },
+    { include: { any: {} } },
+    { include: { state: {} } },
+    { include: { attributes: [] } },
+    { include: { state: [] } },
+    { include: {}, sort: { by: "nope" } },
+    { include: {}, sort: { by: "attribute" } },
+    { include: {}, sort: { by: "name", reverse: "false" } },
+    { include: {}, limit: -1 },
+    { include: { template: "{{ [] }}" } },
+    { include: {}, exclude: { card: { type: "tile" } } },
+    { include: { all: [{ domain: "light", card: {} }] } },
+    { include: null },
+    { include: [null] },
   ])
     assert.throws(() => normalizeConfig(config), undefined, JSON.stringify(config))
 })
 
 test("quotes user input rather than interpolating Jinja source", () => {
   const text = `pool') }}{% set danger = true %}{{ ('`
-  assert.ok(compileFilter({ area: text }).includes(`area_entities(${JSON.stringify(text)})`))
+  assert.ok(query({ area: text }).includes(`area_entities(${JSON.stringify(text)})`))
 })
 
-test("limits, numeric comparison, and sorting are compiled into the backend query", () => {
-  const query = compileFilter(
+test("limits, numeric comparison, and multi-sort are compiled into the backend query", () => {
+  const template = query(
     { domain: "sensor", state: "< 20" },
-    { by: "state", numeric: true, reverse: true },
-    5
+    { sort: [{ by: "include" }, { by: "state", numeric: true, reverse: true }], limit: 5 }
   )
-  assert.match(query, /is_number\(states\(entity\)\)/)
-  assert.match(query, /float\) < 20/)
-  assert.match(query, /reverse=true/)
-  assert.match(query, /result\[:5\]/)
+  assert.match(template, /is_number\(states\(entity\)\)/)
+  assert.match(template, /float\) < 20/)
+  assert.match(template, /reverse=true/)
+  assert.match(template, /ns.rows\[:5\]/)
+  assert.ok(template.indexOf("sort(attribute='sort1'") < template.indexOf("sort(attribute='sort0'"))
+})
+
+test("card-only edits generate the exact same query for sharing subscriptions", () => {
+  assert.equal(
+    query({ domain: "light", card: { type: "tile" } }),
+    query({ domain: "light", card: { type: "button" } })
+  )
 })

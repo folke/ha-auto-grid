@@ -29,10 +29,14 @@ function fixture(create) {
       updates++
     }
   )
-  grid.configure(normalizeConfig({ entities: "{{ [] }}" }))
+  grid.configure(normalizeConfig({ include: { domain: "light" } }))
   grid.setHass(hass)
   const emit = (ids, index = subscriptions.length - 1) =>
-    subscriptions[index].callback({ result: ids })
+    subscriptions[index].callback({
+      result: Array.isArray(ids)
+        ? ids.map((id) => (typeof id === "string" ? { entity: id, group: 0 } : id))
+        : ids,
+    })
   return {
     grid,
     hass,
@@ -107,17 +111,17 @@ test("reorders retained cards and creates only added entities", async () => {
   f.grid.disconnect()
 })
 
-test("layout/options edits do not reopen a backend subscription", async () => {
+test("layout/card edits do not reopen a backend subscription", async () => {
   const f = fixture()
   f.grid.connect()
   f.emit(["light.pool"])
   await tick()
   const original = f.grid.cards[0].card
-  f.grid.configure(normalizeConfig({ entities: "{{ [] }}", columns: 3 }))
+  f.grid.configure(normalizeConfig({ include: { domain: "light" }, columns: 3 }))
   await tick()
   assert.equal(f.subscriptions.length, 1)
   assert.equal(f.grid.cards[0].card, original)
-  f.grid.configure(normalizeConfig({ entities: "{{ [] }}", options: { type: "button" } }))
+  f.grid.configure(normalizeConfig({ include: { domain: "light" }, card: { type: "button" } }))
   await tick()
   assert.equal(f.subscriptions.length, 1)
   assert.notEqual(f.grid.cards[0].card, original)
@@ -131,7 +135,7 @@ test("changed queries discard old callbacks and empty results remove previous ca
   f.emit(["light.pool"])
   await tick()
   f.grid.configure(
-    normalizeConfig({ entities: "{{ ['light.new'] }}", options: { type: "button" } })
+    normalizeConfig({ include: { entity_id: "light.new" }, card: { type: "button" } })
   )
   f.emit(["light.stale"], 0)
   f.emit([])
@@ -180,7 +184,7 @@ test("invalid results show an error and a subsequent valid result recovers", asy
   f.grid.connect()
   f.emit("not a list")
   await tick()
-  assert.match(f.grid.error, /list of entity IDs/)
+  assert.match(f.grid.error, /list of entity\/group matches/)
   f.emit(["light.pool"])
   await tick()
   assert.equal(f.grid.error, undefined)
@@ -221,16 +225,122 @@ test("connection replacement releases the old subscription", async () => {
   f.grid.disconnect()
 })
 
-test("static lists need no backend subscription and preserve nested shared options", async () => {
+test("explicit entity queries preserve independent nested card options", async () => {
   const f = fixture()
   f.grid.configure(
-    normalizeConfig({ entities: ["light.a", "light.b"], options: { name: { type: "entity" } } })
+    normalizeConfig({
+      include: { entity_id: ["light.a", "light.b"] },
+      card: { name: { type: "entity" } },
+    })
   )
   f.grid.connect()
   await tick()
-  assert.equal(f.subscriptions.length, 0)
+  assert.equal(f.subscriptions.length, 1)
+  f.emit(["light.a", "light.b"])
+  await tick()
   assert.equal(f.created.length, 2)
   f.created[0].config.name.type = "device"
   assert.equal(f.created[1].config.name.type, "entity")
   f.grid.disconnect()
+})
+
+test("changing one group's card only recreates that group's children", async () => {
+  const f = fixture()
+  const config = {
+    card: { name: { type: "entity" }, features: ["shared"] },
+    include: [{ domain: "light" }, { domain: "sensor" }],
+  }
+  f.grid.configure(normalizeConfig(config))
+  f.grid.connect()
+  f.emit([
+    { entity: "light.a", group: 0 },
+    { entity: "sensor.b", group: 1 },
+  ])
+  await tick()
+  const [a, b] = f.grid.cards.map(({ card }) => card)
+  f.grid.configure(
+    normalizeConfig({
+      ...config,
+      include: [{ domain: "light", card: { type: "button", features: [] } }, { domain: "sensor" }],
+    })
+  )
+  await tick()
+  assert.equal(f.subscriptions.length, 1)
+  assert.notEqual(f.grid.cards[0].card, a)
+  assert.equal(f.grid.cards[1].card, b)
+  assert.deepEqual(f.grid.cards[0].card.config, {
+    type: "button",
+    name: { type: "entity" },
+    features: [],
+    entity: "light.a",
+  })
+  assert.equal(f.created.length, 3)
+  f.grid.disconnect()
+})
+
+test("a winning-group change replaces the card only if effective configuration changes", async () => {
+  const f = fixture()
+  f.grid.configure(
+    normalizeConfig({
+      include: [
+        { domain: "light" },
+        { domain: "light" },
+        { domain: "light", card: { type: "button" } },
+      ],
+    })
+  )
+  f.grid.connect()
+  f.emit([{ entity: "light.a", group: 0 }])
+  await tick()
+  const card = f.grid.cards[0].card
+  const updates = f.updates
+  f.emit([{ entity: "light.a", group: 1 }])
+  await tick()
+  assert.equal(f.grid.cards[0].card, card)
+  assert.equal(f.grid.cards[0].group, 1)
+  assert.equal(f.updates, updates)
+  f.emit([{ entity: "light.a", group: 2 }])
+  await tick()
+  assert.notEqual(f.grid.cards[0].card, card)
+  assert.equal(f.grid.cards[0].card.config.type, "button")
+  assert.equal(f.created.length, 2)
+  f.grid.disconnect()
+})
+
+test("editing group options during pending card creation cannot commit old options", async () => {
+  const pending = []
+  const f = fixture((config) => new Promise((resolve) => pending.push(() => resolve({ config }))))
+  f.grid.connect()
+  f.emit(["light.a"])
+  f.grid.configure(normalizeConfig({ include: { domain: "light" }, card: { type: "button" } }))
+  pending[1]()
+  await tick()
+  pending[0]()
+  await tick()
+  assert.equal(f.subscriptions.length, 1)
+  assert.equal(f.grid.cards[0].card.config.type, "button")
+  f.grid.disconnect()
+})
+
+test("identical queries share subscriptions even with different card configurations", async () => {
+  const f = fixture()
+  const other = new GridController(
+    async (config) => ({ config }),
+    () => {}
+  )
+  other.configure(normalizeConfig({ include: { domain: "light" }, card: { type: "button" } }))
+  other.setHass(f.hass)
+  f.grid.connect()
+  other.connect()
+  assert.equal(f.subscriptions.length, 1)
+  f.emit(["light.a"])
+  await tick()
+  assert.equal(f.grid.cards[0].card.config.type, "tile")
+  assert.equal(other.cards[0].card.config.type, "button")
+  f.grid.disconnect()
+  await tick()
+  assert.equal(f.stops, 0)
+  other.disconnect()
+  await tick()
+  assert.equal(f.stops, 1)
 })

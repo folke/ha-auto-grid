@@ -45,10 +45,14 @@
             })
           },
         }
+        const emit = (index, ids) =>
+          subscriptions[index].callback({
+            result: ids.map((id) => (typeof id === "string" ? { entity: id, group: 0 } : id)),
+          })
         const hass = { connection, states: {} }
         const config = {
-          filter: { area: "pool", domain: "light" },
-          options: { name: { type: "entity" } },
+          include: { area: "pool", domain: "light" },
+          card: { name: { type: "entity" } },
         }
         const grid = document.createElement("auto-grid")
         grid.setConfig(config)
@@ -57,7 +61,7 @@
         document.body.append(grid)
         await tick()
         assert(subscriptions.length === 1, "subscribed when mounted")
-        subscriptions[0].callback({ result: ["light.a", "light.b"] })
+        emit(0, ["light.a", "light.b"])
         await tick()
         await grid.updateComplete
         const tiles = () => [...grid.shadowRoot.querySelectorAll("test-tile")]
@@ -80,7 +84,7 @@
         await tick()
         assert(mutations === 0, "hass updates do not touch grid DOM")
         assert(a.hass.states.generation === 99, "updated state reaches children")
-        subscriptions[0].callback({ result: ["light.b", "light.a", "light.c"] })
+        emit(0, ["light.b", "light.a", "light.c"])
         await tick()
         assert(tiles()[0] === b && tiles()[1] === a, "keyed rendering preserves card identity")
         assert(created === 3, "only the added card was created")
@@ -99,11 +103,11 @@
         assert(stops === 1, "unsubscribes on removal")
         document.body.append(grid)
         await tick()
-        subscriptions[1].callback({ result: ["light.b", "light.a", "light.c"] })
+        emit(1, ["light.b", "light.a", "light.c"])
         await tick()
         assert(tiles()[0] === b && created === 3, "remount reuses existing cards")
         grid.setConfig({ ...config, show_empty: false })
-        subscriptions[1].callback({ result: [] })
+        emit(1, [])
         await tick()
         assert(getComputedStyle(grid).display === "none", "empty result hides grid")
         assert(!grid.hidden && stops === 1, "empty grids remain subscribed so they can recover")
@@ -111,7 +115,7 @@
         await tick()
         assert(getComputedStyle(grid).display !== "none", "empty grid remains editable in preview")
         grid.preview = false
-        subscriptions[1].callback({ result: ["light.a"] })
+        emit(1, ["light.a"])
         await tick()
         assert(
           getComputedStyle(grid).display !== "none" && tiles().length === 1,
@@ -125,12 +129,42 @@
         )
         grid.shadowRoot.querySelector("button").click()
         await tick()
-        subscriptions[2].callback({ result: ["light.a"] })
+        emit(2, ["light.a"])
         await tick()
         assert(
           tiles().length === 1 && !grid.shadowRoot.querySelector('[role="alert"]'),
           "retry recovers"
         )
+        grid.setConfig({
+          ...config,
+          include: [
+            { domain: "light", state: "on", card: { type: "button" } },
+            { domain: "light" },
+          ],
+        })
+        await tick()
+        emit(3, [
+          { entity: "light.a", group: 0 },
+          { entity: "light.b", group: 1 },
+        ])
+        await tick()
+        const [button, tile] = tiles()
+        assert(
+          button.config.type === "button" && tile.config.type === "tile",
+          "per-include card configuration"
+        )
+        assert(button.config.name.type === "entity", "group cards inherit global defaults")
+        emit(3, [
+          { entity: "light.a", group: 1 },
+          { entity: "light.b", group: 1 },
+        ])
+        await tick()
+        assert(
+          tiles()[0] !== button && tiles()[0].config.type === "tile",
+          "winning-group change replaces changed card"
+        )
+        assert(tiles()[1] === tile, "winning-group change preserves unaffected cards")
+        assert(subscriptions.length === 4, "group changes don't reopen the backend query")
         observer.disconnect()
         grid.remove()
         await tick()
