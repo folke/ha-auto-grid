@@ -85,6 +85,7 @@ for case in payload:
         return case.get("labels", {}).get(label, {}).get("name")
 
     env.filters["label_name"] = label_name
+    env.filters["to_json"] = lambda value, sort_keys=False: json.dumps(value, sort_keys=sort_keys, allow_nan=False)
     env.globals.update(
         entity_name=entity_name,
         area_name=lambda entity: entity_area(entity).get("name"),
@@ -105,6 +106,6 @@ for case in payload:
             calls[key] = calls.get(key, 0) + 1
             return case.get("memberships", {}).get(key, [])
         env.globals[kind + "_entities"] = entities
-    result = env.from_string(case["template"]).render()
+    result = env.from_string(case["template"]).render(**case.get("variables", {}))
     output.append({"result": ast.literal_eval(result.strip()), "calls": calls})
 json.dump(output, sys.stdout)

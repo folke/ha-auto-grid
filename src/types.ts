@@ -13,6 +13,7 @@ export interface TemplateResult {
 }
 
 export interface Connection {
+  sendMessagePromise?<T>(message: Record<string, unknown>): Promise<T>
   subscribeMessage<T>(
     callback: (message: T) => void,
     message: Record<string, unknown>
@@ -48,9 +49,20 @@ export interface Filter {
 }
 
 export type FilterField = keyof Omit<Filter, "all" | "any" | "not">
-export type Include = Filter & { card?: Partial<CardConfig> }
+export type Include = Filter & { group?: string; card?: Partial<CardConfig> }
 
-export type SortField = "include" | FilterField
+export type Field = "group" | FilterField
+export type SortField = Field
+
+export interface Group {
+  by?: Field
+  title?: string
+}
+
+export interface GroupConfig {
+  by: Field
+  title: string
+}
 
 export interface Sort {
   by?: SortField
@@ -67,6 +79,7 @@ export interface AutoGridConfig {
   card?: Partial<CardConfig>
   include: Include | Include[]
   exclude?: Filter | Filter[]
+  group?: boolean | Field | Group
   sort?: Sort | SortField | (Sort | SortField)[]
   limit?: number
   [key: string]: unknown
@@ -77,9 +90,30 @@ export interface QueryMatch {
   group: number
 }
 
+export type GroupValue =
+  | null
+  | boolean
+  | number
+  | string
+  | GroupValue[]
+  | { [key: string]: GroupValue }
+
+export interface QuerySection {
+  key: string
+  value: GroupValue
+  title: string
+  matches: QueryMatch[]
+}
+
+export interface QueryResult {
+  matches: QueryMatch[]
+  sections?: QuerySection[]
+}
+
 export interface CompiledQuery {
   template: string
   cards: CardConfig[]
+  group?: GroupConfig
 }
 
 export interface GridConfig {

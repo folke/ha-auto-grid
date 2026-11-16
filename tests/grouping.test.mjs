@@ -1,0 +1,301 @@
+import assert from "node:assert/strict"
+import { spawnSync } from "node:child_process"
+import { fileURLToPath } from "node:url"
+import { test } from "node:test"
+import { normalizeConfig, normalizeResult } from "../src/query.ts"
+
+const python = spawnSync("python3", ["-c", "import jinja2"], { encoding: "utf8" })
+const selection = [
+  { group: "Lights", domain: "light" },
+  { group: "Sensors", domain: "sensor" },
+]
+
+test("group configuration normalizes shorthand and validates fields", () => {
+  for (const group of [true, {}, { by: "group" }, "group"]) {
+    assert.deepEqual(normalizeConfig({ include: selection, group }).query.group, {
+      by: "group",
+      title: "{{ group_name }}",
+    })
+  }
+  assert.equal(normalizeConfig({ include: selection }).query.group, undefined)
+  assert.equal(normalizeConfig({ include: selection, group: false }).query.group, undefined)
+  assert.deepEqual(normalizeConfig({ include: selection, group: "area" }).query.group, {
+    by: "area",
+    title: "{{ group_name }}",
+  })
+  for (const group of [
+    null,
+    1,
+    [],
+    "include",
+    "nope",
+    "all",
+    "attr.",
+    { by: "nope" },
+    { by: null },
+    { title: 1 },
+    { invalid: true },
+  ]) {
+    assert.throws(() => normalizeConfig({ include: selection, group }))
+  }
+  assert.throws(() => normalizeConfig({ include: { group: 2, domain: "light" } }), /include.group/)
+  assert.throws(() => normalizeConfig({ include: { not: { group: "Lights" } } }), /Unknown filter/)
+  assert.throws(() => normalizeConfig({ include: {}, sort: "include" }), /Unknown sort/)
+  assert.equal(
+    normalizeConfig({ include: selection, group: false }).query.template,
+    normalizeConfig({ include: selection }).query.template
+  )
+})
+
+test("grouped results validate types and retain number/string/boolean identities", () => {
+  const config = normalizeConfig({ include: {}, group: true })
+  const sections = [0, "0", false, null, ["a"], { a: 1 }].map((value, i) => ({
+    value,
+    title: String(value),
+    matches: [{ entity: `light.item_${i}`, group: 0 }],
+  }))
+  const result = normalizeResult(sections, config)
+  assert.equal(new Set(result.sections.map(({ key }) => key)).size, 6)
+  assert.equal(result.matches.length, 6)
+  for (const invalid of [
+    null,
+    [{ title: "x", value: undefined, matches: [] }],
+    [{ title: 1, value: "a", matches: [] }],
+    [{ title: "x", value: "a", matches: [] }],
+    [sections[0], sections[0]],
+    [sections[0], { ...sections[1], matches: sections[0].matches }],
+  ]) {
+    assert.throws(() => normalizeResult(invalid, config))
+  }
+})
+
+test(
+  "backend grouping merges values, renders titles, and preserves sorted membership",
+  {
+    skip: python.status !== 0 ? "Optional check requires Python 3 with jinja2 installed" : false,
+  },
+  () => {
+    const payload = {
+      states: {
+        "light.a": { state: "on", name: "A", attributes: { bucket: 1 } },
+        "sensor.b": { state: "on", name: "B", attributes: { bucket: 1.0 } },
+        "light.c": { state: "off", name: "C", attributes: { bucket: true } },
+        "sensor.d": { state: "off", name: "D", attributes: { bucket: "1" } },
+        "sensor.e": { state: "on", name: "E" },
+      },
+      registry: {
+        "light.a": {
+          entity_name: "A",
+          device_id: "a",
+          area_id: "pool",
+          labels: ["z", "a"],
+          config_entry_id: "mqtt_one",
+        },
+        "sensor.b": { entity_name: "B", area_id: "kitchen", config_entry_id: "mqtt_two" },
+        "light.c": {
+          entity_name: "C",
+          device_id: "c",
+          area_id: "pool",
+          labels: ["a", "z"],
+          config_entry_id: "zha_one",
+        },
+        "sensor.d": { entity_name: "D", area_id: "kitchen" },
+      },
+      devices: { a: { name: "Repeated" }, c: { name: "Repeated" } },
+      areas: { pool: { name: "Pool" }, kitchen: { name: "Kitchen" } },
+      labels: { a: { name: "Alpha" }, z: { name: "Zulu" } },
+      config_entries: {
+        mqtt_one: { domain: "mqtt" },
+        mqtt_two: { domain: "mqtt" },
+        zha_one: { domain: "zha" },
+      },
+    }
+    const firstObject = { x: 1, y: [true, "1"] }
+    const secondObject = { x: 1, y: [1, "1"] }
+    const thirdObject = { x: 1, y: [true, 1] }
+    payload.states["light.a"].attributes.complex = firstObject
+    payload.states["sensor.b"].attributes.complex = { y: [true, "1"], x: 1 }
+    payload.states["light.c"].attributes.complex = secondObject
+    payload.states["sensor.d"].attributes.complex = thirdObject
+    const section = (value, title, ...entities) => ({ value, title, entities })
+    const cases = [
+      [
+        { include: selection, group: true },
+        [
+          section("Lights", "Lights", "light.a", "light.c"),
+          section("Sensors", "Sensors", "sensor.b", "sensor.d", "sensor.e"),
+        ],
+      ],
+      [
+        { include: selection.map((i) => ({ ...i, group: "Everything" })), group: true },
+        [
+          section(
+            "Everything",
+            "Everything",
+            "light.a",
+            "sensor.b",
+            "light.c",
+            "sensor.d",
+            "sensor.e"
+          ),
+        ],
+      ],
+      [
+        { include: [{ domain: "light" }, { domain: "sensor", group: "0" }], group: true },
+        [
+          section(0, "0", "light.a", "light.c"),
+          section("0", "0", "sensor.b", "sensor.d", "sensor.e"),
+        ],
+      ],
+      [
+        { include: selection, group: "area" },
+        [
+          section("Pool", "Pool", "light.a", "light.c"),
+          section("Kitchen", "Kitchen", "sensor.b", "sensor.d"),
+          section(null, "", "sensor.e"),
+        ],
+      ],
+      [
+        { include: selection, group: "device" },
+        [
+          section("Repeated", "Repeated", "light.a", "light.c"),
+          section(null, "", "sensor.b", "sensor.d", "sensor.e"),
+        ],
+      ],
+      [
+        { include: selection, group: "label" },
+        [
+          section(["Alpha", "Zulu"], "['Alpha', 'Zulu']", "light.a", "light.c"),
+          section([], "[]", "sensor.b", "sensor.d", "sensor.e"),
+        ],
+      ],
+      [
+        { include: selection, group: "attr.bucket" },
+        [
+          section(1, "1", "light.a", "sensor.b"),
+          section(true, "True", "light.c"),
+          section("1", "1", "sensor.d"),
+          section(null, "", "sensor.e"),
+        ],
+      ],
+      [
+        { include: selection, group: { by: "attr.complex", title: "Object" } },
+        [
+          section(firstObject, "Object", "light.a", "sensor.b"),
+          section(secondObject, "Object", "light.c"),
+          section(thirdObject, "Object", "sensor.d"),
+          section(null, "Object", "sensor.e"),
+        ],
+      ],
+      [
+        { include: selection, group: true, limit: 2 },
+        [section("Lights", "Lights", "light.a"), section("Sensors", "Sensors", "sensor.b")],
+      ],
+      [{ include: selection, group: true, limit: 0 }, []],
+      [
+        { include: selection, group: true, exclude: { domain: "light" } },
+        [section("Sensors", "Sensors", "sensor.b", "sensor.d", "sensor.e")],
+      ],
+      [
+        {
+          include: selection,
+          group: {
+            by: "area",
+            title: "{{ group_name or 'Other' }}: {{ entity_id }} / {{ entity.name }}",
+          },
+        },
+        [
+          section("Pool", "Pool: light.a / A", "light.a", "light.c"),
+          section("Kitchen", "Kitchen: sensor.b / B", "sensor.b", "sensor.d"),
+          section(null, "Other: sensor.e / E", "sensor.e"),
+        ],
+      ],
+      [
+        {
+          include: selection,
+          group: { title: "{% if group == 'Lights' %}Lighting{% else %}Other{% endif %}" },
+        },
+        [
+          section("Lights", "Lighting", "light.a", "light.c"),
+          section("Sensors", "Other", "sensor.b", "sensor.d", "sensor.e"),
+        ],
+      ],
+      [
+        { include: selection, group: { title: "" } },
+        [
+          section("Lights", "", "light.a", "light.c"),
+          section("Sensors", "", "sensor.b", "sensor.d", "sensor.e"),
+        ],
+      ],
+      [
+        { include: selection, group: "integration" },
+        [
+          section("mqtt", "mqtt", "light.a", "sensor.b"),
+          section("zha", "zha", "light.c"),
+          section(null, "", "sensor.d", "sensor.e"),
+        ],
+      ],
+      [
+        {
+          include: selection,
+          group: "integration",
+          variables: { ag_integration_names: { mqtt: "MQTT", zha: "Zigbee Home Automation" } },
+        },
+        [
+          section("mqtt", "MQTT", "light.a", "sensor.b"),
+          section("zha", "Zigbee Home Automation", "light.c"),
+          section(null, "", "sensor.d", "sensor.e"),
+        ],
+      ],
+      [
+        {
+          include: [
+            { group: "Z", domain: "light" },
+            { group: "A", domain: "sensor" },
+          ],
+          group: true,
+          sort: ["group", "name"],
+        },
+        [
+          section("A", "A", "sensor.b", "sensor.d", "sensor.e"),
+          section("Z", "Z", "light.a", "light.c"),
+        ],
+      ],
+      [
+        { include: selection, group: "area", sort: [{ by: "name", reverse: true }] },
+        [
+          section(null, "", "sensor.e"),
+          section("Kitchen", "Kitchen", "sensor.d", "sensor.b"),
+          section("Pool", "Pool", "light.c", "light.a"),
+        ],
+      ],
+    ]
+    const output = spawnSync(
+      "python3",
+      [fileURLToPath(new URL("./render-template.py", import.meta.url))],
+      {
+        input: JSON.stringify(
+          cases.map(([config]) => ({
+            ...payload,
+            variables: config.variables,
+            template: normalizeConfig(config).query.template,
+          }))
+        ),
+        encoding: "utf8",
+      }
+    )
+    assert.equal(output.status, 0, output.stderr)
+    JSON.parse(output.stdout).forEach((actual, i) => {
+      assert.deepEqual(
+        actual.result.map(({ value, title, matches }) => ({
+          value,
+          title,
+          entities: matches.map(({ entity }) => entity),
+        })),
+        cases[i][1],
+        JSON.stringify(cases[i][0])
+      )
+      normalizeResult(actual.result, normalizeConfig(cases[i][0]))
+    })
+  }
+)

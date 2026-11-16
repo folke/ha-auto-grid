@@ -1,12 +1,24 @@
-import { normalizeMatches } from "./query.ts"
+import { normalizeResult } from "./query.ts"
+import { integrationNames } from "./integrations.ts"
 import { subscribeTemplate } from "./subscriptions.ts"
-import type { CardConfig, GridConfig, HomeAssistant, LovelaceCard, QueryMatch } from "./types.ts"
+import type {
+  CardConfig,
+  GridConfig,
+  HomeAssistant,
+  LovelaceCard,
+  QueryMatch,
+  QueryResult,
+  GroupValue,
+} from "./types.ts"
 
 type CreateCard = (config: CardConfig) => Promise<LovelaceCard>
 type GridCard = QueryMatch & { card: LovelaceCard; configKey: string }
+export type GridSection = { key: string; value: GroupValue; title: string; cards: GridCard[] }
 
 export class GridController {
   cards: GridCard[] = []
+  sections?: GridSection[]
+  private sectionSignature?: string
   loading = true
   error?: string
 
@@ -16,7 +28,7 @@ export class GridController {
   private dispose?: () => void
   private revision = 0
   private subscriptionToken = 0
-  private selection?: QueryMatch[]
+  private selection?: unknown
   private cache = new Map<string, GridCard>()
   private create: CreateCard
   private changed: () => void
@@ -34,7 +46,7 @@ export class GridController {
     if (queryChanged) {
       this.selection = undefined
       this.restart()
-    } else if (cardsChanged && this.selection && this.active && this.hass) {
+    } else if (cardsChanged && this.selection !== undefined && this.active && this.hass) {
       void this.select(this.selection)
     } else {
       this.changed()
@@ -77,21 +89,36 @@ export class GridController {
     this.loading = true
     this.error = undefined
     this.changed()
-    this.dispose = subscribeTemplate(this.hass.connection, this.config.query.template, {
-      result: (value) => {
-        if (this.active && this.subscriptionToken === token) void this.select(value)
-      },
-      error: (error) => {
-        if (this.active && this.subscriptionToken === token) this.fail(error)
-      },
-    })
+    const connection = this.hass.connection
+    const template = this.config.query.template
+    const subscribe = (variables?: Record<string, unknown>) => {
+      if (!this.active || this.subscriptionToken !== token) return
+      this.dispose = subscribeTemplate(
+        connection,
+        template,
+        {
+          result: (value) => {
+            if (this.active && this.subscriptionToken === token) void this.select(value)
+          },
+          error: (error) => {
+            if (this.active && this.subscriptionToken === token) this.fail(error)
+          },
+        },
+        variables
+      )
+    }
+    if (this.config.query.group?.by === "integration") {
+      void integrationNames(connection).then((names) => subscribe({ ag_integration_names: names }))
+    } else subscribe()
   }
 
   private async select(value: unknown): Promise<void> {
     const revision = ++this.revision
     try {
-      const matches = normalizeMatches(value, this.config!.query.cards.length)
-      this.selection = matches
+      const result = normalizeResult(value, this.config!)
+      const matches = result.matches
+      this.selection = value
+      const signature = JSON.stringify(result.sections)
       const requests = matches.map((match) => {
         const config = this.config!.query.cards[match.group]
         return { ...match, config, configKey: JSON.stringify(config) }
@@ -103,13 +130,15 @@ export class GridController {
             request.entity === this.cards[i].entity && request.configKey === this.cards[i].configKey
         )
       if (unchanged) {
-        const changed = this.loading || this.error !== undefined
+        const changed =
+          this.loading || this.error !== undefined || this.sectionSignature !== signature
         this.loading = false
         this.error = undefined
         // A different include can have the same effective card configuration.
         this.cards.forEach((card, i) => {
           card.group = matches[i].group
         })
+        this.setSections(result, signature)
         if (changed) this.changed()
         return
       }
@@ -127,12 +156,23 @@ export class GridController {
       for (const { card } of cards) card.hass = this.hass!
       this.cache = new Map(cards.map((entry) => [entry.entity, entry]))
       this.cards = cards
+      this.setSections(result, signature)
       this.loading = false
       this.error = undefined
       this.changed()
     } catch (error) {
       if (this.active && revision === this.revision) this.fail(error)
     }
+  }
+
+  private setSections(result: QueryResult, signature: string | undefined): void {
+    this.sectionSignature = signature
+    this.sections = result.sections?.map((section) => ({
+      key: section.key,
+      value: section.value,
+      title: section.title,
+      cards: section.matches.map(({ entity }) => this.cache.get(entity)!),
+    }))
   }
 
   private fail(error: unknown): void {

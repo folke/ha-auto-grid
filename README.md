@@ -39,7 +39,7 @@ card:
 ```
 
 `card.type` defaults to `tile`, `columns` to `2`, and `square` to `false`.
-Results are sorted by include group, then alphabetically by name by default.
+Results are sorted alphabetically by name by default, regardless of include rules.
 An optional `title` appears above the grid with native grid-card header styling.
 It hides together with the grid when empty and `show_empty` is false.
 
@@ -69,7 +69,9 @@ independent copy. The `entity` field is reserved and cannot be configured in `ca
 `exclude` accepts a filter or list of filters. Matching **any** exclusion removes the
 entity globally, regardless of which include group selected it. A `not` rule inside
 an include group excludes only from that group; a later group can still select it.
-Exclusions and nested filters cannot contain card configuration.
+Exclusions and nested filters cannot contain card configuration or a group label.
+Include rules can additionally set `group: Lights` to name their synthetic group;
+without a name, the group value is the zero-based include-rule index.
 
 ```yaml
 type: custom:auto-grid
@@ -105,6 +107,98 @@ sort: []
 
 `sort: []` preserves the supplied order. `include: []` selects nothing; `include: {}`
 selects every entity with a state. Be mindful of HA's rate limits for broad queries.
+
+## Grouping
+
+Grouping adds section-style headings and a fresh grid for each group. It is disabled
+by default. The top-level `include` field still selects entities; `group` controls
+how the results are presented.
+
+```yaml
+type: custom:auto-grid
+title: Controls
+include:
+  - group: Lights
+    domain: light
+  - group: Problems
+    domain: binary_sensor
+    device_class: problem
+group: true
+```
+
+| `group`                      | Meaning                                             |
+| ---------------------------- | --------------------------------------------------- |
+| Omitted / `false`            | One grid without group headings                     |
+| `true` / `{}` / `group`      | Group by the winning include's group label or index |
+| `area` (or another field)    | Group by that field's value                         |
+| `{ by: area, title: "..." }` | Group by a field with a custom heading template     |
+
+```yaml
+# Group lights by their resolved area name
+type: custom:auto-grid
+include:
+  domain: light
+group: area
+```
+
+Equal field values merge, even when they come from different include rules or
+metadata entries. For example, different devices both named `TV` intentionally
+share a device group. Two includes named `Lights` also merge. Types remain distinct:
+numeric `0`, string `"0"`, and boolean `false` are separate values. Label grouping uses
+the entire canonical label-name list; it does not duplicate entities into multiple
+groups. Objects are compared by value, ignoring key order.
+
+Sorting happens first, then the global limit, then grouping. Group order follows
+first appearance in the sorted/limited results, and cards retain their relative order
+within each group. The default name sort does **not** implicitly alphabetize group
+headings. To order by the group field, use an explicit sort:
+
+```yaml
+group: area
+sort:
+  - area
+  - name
+```
+
+For named include groups, use `group: true` and `sort: [group, name]`. Unnamed fallback
+indexes sort numerically, followed by named groups alphabetically; `reverse` reverses
+that order. `sort: group` works even when visual grouping is disabled.
+
+### Heading templates
+
+The default heading template is `{{ group_name }}`. A custom `group.title` is rendered
+inside the existing backend query, not through a separate subscription per heading.
+It supports full Jinja, and the output is displayed as text, never HTML.
+
+Available variables:
+
+- `group`: the literal grouping value.
+- `group_name`: its default display value. Usually the same as `group`, but integration
+  domains use manifest names (`mqtt` → `MQTT`). Missing values use an empty display value.
+- `entity_id`: the first entity in the group after sorting and limiting.
+- `entity`: that entity's state object; use `entity_name(entity_id, fallback=true)` for
+  modern entity naming rather than its legacy `.name` property.
+
+```yaml
+group:
+  by: area
+  title: "{{ group_name or 'Unassigned' }}"
+```
+
+```yaml
+group:
+  by: label
+  title: "{{ group | join(', ') or 'Unlabelled' }}"
+```
+
+Integration display names are fetched once per HA connection with `manifest/list`
+and cached. The names are passed as variables to the same template subscription.
+Lookup failures fall back to the raw domain and do not prevent the grid from loading.
+Custom templates can use `group` for the domain and `group_name` for the friendly name.
+
+Missing values form a group rather than dropping entities. An empty title omits its
+heading but keeps a separate grid. Empty groups never render. Top-level `title` and
+`show_empty` retain their usual behavior for the whole card.
 
 ## Filter rules
 
@@ -183,7 +277,7 @@ include:
   attr.device_class: battery
   attr.battery_level: "< 20"
 sort:
-  - include
+  - group
   - by: attr.battery_level
     numeric: true
   - name
@@ -221,8 +315,8 @@ sort:
 limit: 8
 ```
 
-Raw user templates, nested attribute paths, translated-state matching, relative-time
-rules, and per-group sorting/pagination are not implemented. Unknown filter rules
+Raw selection templates, nested attribute paths, translated-state matching, relative-time
+rules, and per-group sorting/pagination are not implemented. Heading templates are supported. Unknown filter rules
 are rejected. The earlier `filter`, `entities`, and `options` fields have been replaced
 by `include`/`exclude` and `card`; old configurations produce a migration error.
 The previous `attributes: { battery: ... }` notation is now `attr.battery: ...`;
@@ -234,10 +328,10 @@ The previous `attributes: { battery: ... }` notation is now `attr.battery: ...`;
 The default is:
 
 ```yaml
-sort:
-  - include
-  - name
+sort: name
 ```
+
+Include order controls first-match selection and card overrides, not default ordering.
 
 An explicit `sort` **replaces** the default. A string such as `sort: name` is shorthand
 for `sort: { by: name }`. A single string or object is shorthand for a one-element list.
@@ -250,9 +344,9 @@ sort: name
 ```
 
 ```yaml
-# Include grouping, then descending numeric state within each group
+# Named include groups, then descending numeric state within each group
 sort:
-  - include
+  - group
   - by: state
     numeric: true
     reverse: true
@@ -260,12 +354,12 @@ sort:
 
 Every filter field is also sortable: `area`, `floor`, `device`, `label`, `domain`,
 `entity_id`, `device_class`, `hidden`, `state`, `name`, `last_changed`, `last_updated`,
-`integration`, and `attr.<name>`. `include` additionally sorts by the winning include
-group's index. Boolean operators `all`/`any`/`not` are not fields and cannot be sorted.
+`integration`, and `attr.<name>`. The synthetic `group` field is the winning include's
+label or fallback index; it replaces the earlier `sort: include` spelling. Boolean operators `all`/`any`/`not` are not fields and cannot be sorted.
 
 Use an object to set independent `numeric` and `reverse` flags for each sort. If `by`
 is omitted from an object, it defaults to `name` (for example, `sort: { reverse: true }`).
-Include, hidden, and timestamp sorts are numeric automatically; hidden sorts visible
+Hidden and timestamp sorts are numeric automatically; hidden sorts visible
 entities first unless reversed. String sorts are case-insensitive. Missing/non-numeric
 values in numeric sorts go last in either direction.
 
@@ -288,22 +382,23 @@ without registry entries use the state object's name. This follows HA's modern n
 model rather than the legacy/composed `friendly_name` attribute. It does not evaluate
 `card.name` or compose area/device/entity parts from the card configuration.
 
-`limit` applies last, after selection, global exclusion, deduplication, and sorting.
+`limit` applies after selection, global exclusion, deduplication, and sorting, before visual grouping.
 `limit: 0` returns an empty list. There are no per-include limits.
 
 ## Options
 
-| Option       | Default            | Description                                                              |
-| ------------ | ------------------ | ------------------------------------------------------------------------ |
-| `include`    | Required           | A selection filter or list; groups may override `card`                   |
-| `exclude`    | —                  | A global exclusion filter or list                                        |
-| `card`       | `{ type: tile }`   | Shared child-card configuration; `entity` is reserved                    |
-| `title`      | —                  | Optional text heading above the grid                                     |
-| `columns`    | `2`                | Positive integer; fixed equal-width columns                              |
-| `square`     | `false`            | Square cells, like the native grid card                                  |
-| `show_empty` | `false`            | Show an empty-state message instead of hiding the grid                   |
-| `sort`       | Include, then name | Sort string/object or mixed priority-ordered list; `[]` disables sorting |
-| `limit`      | —                  | Maximum number of results, applied last                                  |
+| Option       | Default          | Description                                                              |
+| ------------ | ---------------- | ------------------------------------------------------------------------ |
+| `include`    | Required         | A selection filter or list; groups may override `card`                   |
+| `exclude`    | —                | A global exclusion filter or list                                        |
+| `card`       | `{ type: tile }` | Shared child-card configuration; `entity` is reserved                    |
+| `title`      | —                | Optional text heading above the grid                                     |
+| `columns`    | `2`              | Positive integer; fixed equal-width columns                              |
+| `square`     | `false`          | Square cells, like the native grid card                                  |
+| `show_empty` | `false`          | Show an empty-state message instead of hiding the grid                   |
+| `group`      | `false`          | Boolean, field name, or `{ by, title }` for visual grouping              |
+| `sort`       | `name`           | Sort string/object or mixed priority-ordered list; `[]` disables sorting |
+| `limit`      | —                | Maximum number of results, applied last                                  |
 
 This is an equal-column grid, not the full Sections layout engine. It does not
 implement per-card column/row spans. Grid spacing can be customized with the
@@ -311,13 +406,15 @@ implement per-card column/row spans. Grid spacing can be customized with the
 
 ## Performance and lifecycle
 
-- One backend query returns ordered entity IDs and their winning include-group indexes.
-  Card configuration is never sent to the backend.
+- One backend query returns entity IDs and winning include-rule indexes, optionally
+  organized into typed groups with rendered titles. Card configuration is never sent
+  to the backend. There are no per-heading template subscriptions.
 - Identical generated queries share one subscription per HA connection, even when
   their frontend card configurations differ.
 - Ordinary `hass` updates only forward state to existing child cards. They do not run
   filters, call child `setConfig()`, or re-render the grid.
-- Membership/order changes reuse cards by entity ID and effective configuration.
+- Membership/order changes, including moves between visual groups, reuse cards by
+  entity ID and effective configuration.
   A winning-group change only replaces a card if its effective configuration changes.
 - Editing card configuration only recreates affected children, without reopening the
   query. Removed cards are released.

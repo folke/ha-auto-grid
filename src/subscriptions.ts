@@ -32,17 +32,19 @@ function unsubscribe(entry: Entry): void {
 export function subscribeTemplate(
   connection: Connection,
   template: string,
-  consumer: Consumer
+  consumer: Consumer,
+  variables?: Record<string, unknown>
 ): () => void {
+  const key = JSON.stringify([template, variables ?? {}])
   let entries = connections.get(connection)
   if (!entries) {
     entries = new Map()
     connections.set(connection, entries)
   }
-  let entry = entries.get(template)
+  let entry = entries.get(key)
   if (!entry) {
     entry = { consumers: new Set(), hasValue: false, closed: false }
-    entries.set(template, entry)
+    entries.set(key, entry)
     const current = entry
     // Attach the consumer before subscribing: a connection may deliver cached data immediately.
     current.consumers.add(consumer)
@@ -65,7 +67,7 @@ export function subscribeTemplate(
             current.error = undefined
             current.consumers.forEach((c) => c.result(message.result))
           },
-          { type: "render_template", template }
+          { type: "render_template", template, ...(variables ? { variables } : {}) }
         )
         .then((dispose) => {
           current.unsubscribe = dispose
@@ -86,7 +88,7 @@ export function subscribeTemplate(
     current.consumers.delete(consumer)
     if (current.closed || current.consumers.size) return
     current.closed = true
-    entries.delete(template)
+    entries.delete(key)
     unsubscribe(current)
   }
 }

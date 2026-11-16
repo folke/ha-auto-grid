@@ -197,6 +197,101 @@
         )
         assert(tiles()[1] === tile, "winning-group change preserves unaffected cards")
         assert(subscriptions.length === 4, "group changes don't reopen the backend query")
+        const retainedA = tiles()[0]
+        grid.setConfig({ ...config, group: "area" })
+        await tick()
+        const section = (value, title, entities) => ({
+          value,
+          title,
+          matches: entities.map((entity) => ({ entity, group: 0 })),
+        })
+        const emitSections = (value) => subscriptions[4].callback({ result: value })
+        emitSections([section("Pool", "Pool", ["light.a"]), section("Other", "Other", ["light.b"])])
+        await tick()
+        assert(
+          grid.shadowRoot.querySelectorAll(".section").length === 2,
+          "renders a fresh grid per group"
+        )
+        assert(
+          [...grid.shadowRoot.querySelectorAll(".group-header")]
+            .map((el) => el.textContent)
+            .join() === "Pool,Other",
+          "renders group headings"
+        )
+        assert(
+          tiles()[0] === retainedA && tiles()[1] === tile,
+          "enabling grouping reuses existing cards"
+        )
+        assert(
+          (await grid.getCardSize()) === 4,
+          "group headers and incomplete rows contribute to size"
+        )
+        const createdBeforeMove = created
+        emitSections([section("Other", "<img src=x>", ["light.a", "light.b"])])
+        await tick()
+        assert(grid.shadowRoot.querySelectorAll(".section").length === 1, "removes empty groups")
+        assert(
+          tiles()[0] === retainedA && tiles()[1] === tile && created === createdBeforeMove,
+          "moving a card between groups preserves actual elements"
+        )
+        assert(
+          grid.shadowRoot.querySelector(".group-header").textContent === "<img src=x>" &&
+            !grid.shadowRoot.querySelector("img"),
+          "group headings are text, never HTML"
+        )
+        assert((await grid.getCardSize()) === 2, "merged group starts only one grid row")
+        emitSections([section("Other", "Renamed", ["light.a", "light.b"])])
+        await tick()
+        assert(
+          grid.shadowRoot.querySelector(".group-header").textContent === "Renamed" &&
+            tiles()[0] === retainedA,
+          "title-only changes update without recreating cards"
+        )
+        mutations = 0
+        for (let i = 0; i < 100; i++) grid.hass = { ...hass, states: { generation: i } }
+        await tick()
+        assert(mutations === 0, "grouped state updates don't touch the DOM")
+        emitSections([])
+        await tick()
+        assert(
+          getComputedStyle(grid).display === "none" &&
+            !grid.shadowRoot.querySelector(".group-header"),
+          "empty grouped results hide all headings"
+        )
+        grid.remove()
+        await tick()
+
+        let manifestCalls = 0
+        connection.sendMessagePromise = async (request) => {
+          assert(request.type === "manifest/list", "uses native manifest metadata")
+          manifestCalls++
+          return [{ domain: "mqtt", name: "MQTT" }]
+        }
+        const integrationConfig = { include: { domain: "light" }, group: "integration" }
+        const first = document.createElement("auto-grid"),
+          second = document.createElement("auto-grid")
+        for (const card of [first, second]) {
+          card.setConfig(integrationConfig)
+          card.hass = hass
+          document.body.append(card)
+        }
+        await tick()
+        assert(manifestCalls === 1, "integration manifests are cached per connection")
+        assert(subscriptions.length === 6, "integration groups share one template subscription")
+        assert(
+          subscriptions[5].request.variables.ag_integration_names.mqtt === "MQTT",
+          "integration display names reach backend title templates"
+        )
+        subscriptions[5].callback({ result: [section("mqtt", "MQTT", ["light.a"])] })
+        await tick()
+        assert(
+          first.shadowRoot.querySelector(".group-header").textContent === "MQTT" &&
+            second.shadowRoot.querySelector(".group-header").textContent === "MQTT",
+          "integration groups use backend-rendered friendly headings"
+        )
+        first.remove()
+        second.remove()
+        await tick()
         observer.disconnect()
         grid.remove()
         await tick()

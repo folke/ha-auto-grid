@@ -153,7 +153,7 @@ test(
     const groups = [{ domain: "light" }, { domain: "sensor" }]
     const cases = [
       [
-        "default include/name, with entity-ID fallback",
+        "explicit group/name, with entity-ID fallback",
         { include: groups },
         [
           row("light.a"),
@@ -216,7 +216,7 @@ test(
       ],
       [
         "include then numeric state, unavailable last",
-        { include: groups, sort: [{ by: "include" }, { by: "state", numeric: true }] },
+        { include: groups, sort: [{ by: "group" }, { by: "state", numeric: true }] },
         [
           row("light.a"),
           row("light.z"),
@@ -229,7 +229,7 @@ test(
         "reverse numeric preserves missing-last and group priority",
         {
           include: groups,
-          sort: [{ by: "include" }, { by: "state", numeric: true, reverse: true }],
+          sort: [{ by: "group" }, { by: "state", numeric: true, reverse: true }],
         },
         [
           row("light.a"),
@@ -241,7 +241,7 @@ test(
       ],
       [
         "reverse include order",
-        { include: groups, sort: [{ by: "include", reverse: true }, { by: "name" }] },
+        { include: groups, sort: [{ by: "group", reverse: true }, { by: "name" }] },
         [
           row("sensor.missing", 1),
           row("sensor.z", 1),
@@ -297,11 +297,12 @@ test(
     )
     const manyIncludes = Object.keys(many).map((entity_id) => ({ entity_id }))
     const payload = cases.map(([, config]) => ({
-      template: normalizeConfig(config).query.template,
+      template: normalizeConfig({ ...config, sort: config.sort ?? ["group", "name"] }).query
+        .template,
       states,
     }))
     payload.push({
-      template: normalizeConfig({ include: manyIncludes }).query.template,
+      template: normalizeConfig({ include: manyIncludes, sort: "group" }).query.template,
       states: many,
     })
     const output = spawnSync(
@@ -559,12 +560,12 @@ test(
       [
         {
           include: { domain: "sensor" },
-          sort: ["include", { by: "attr.level", numeric: true, reverse: true }, "name"],
+          sort: ["group", { by: "attr.level", numeric: true, reverse: true }, "name"],
         },
         ["sensor.b", "sensor.d", "sensor.a", "sensor.c"],
       ],
       [{ include: { domain: "sensor" }, sort: "name" }, all],
-      [{ include: { domain: "sensor" }, sort: ["include", "name"] }, all],
+      [{ include: { domain: "sensor" }, sort: ["group", "name"] }, all],
     ]
     const output = spawnSync(
       "python3",

@@ -142,3 +142,25 @@ test("subscription errors are surfaced and recoverable results clear cached erro
   assert.deepEqual(c.errors, ["offline"])
   stopC()
 })
+
+test("template variables participate in subscription sharing", () => {
+  const requests = []
+  const connection = {
+    subscribeMessage(callback, request) {
+      requests.push(request)
+      return Promise.resolve(() => {})
+    },
+  }
+  const a = subscribeTemplate(connection, "query", consumer(), {
+    ag_integration_names: { mqtt: "MQTT" },
+  })
+  const b = subscribeTemplate(connection, "query", consumer(), {
+    ag_integration_names: { mqtt: "MQTT" },
+  })
+  const c = subscribeTemplate(connection, "query", consumer(), { ag_integration_names: {} })
+  assert.equal(requests.length, 2)
+  assert.deepEqual(requests[0].variables, { ag_integration_names: { mqtt: "MQTT" } })
+  a()
+  b()
+  c()
+})

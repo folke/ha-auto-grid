@@ -104,8 +104,15 @@ export class AutoGrid extends LitElement {
         }
       })
     )
+    const byEntity = new Map(this.grid.cards.map(({ entity }, i) => [entity, sizes[i]]))
     let size = 0
-    for (let i = 0; i < sizes.length; i += columns) size += Math.max(...sizes.slice(i, i + columns))
+    const sections = this.grid.sections ?? [{ title: "", cards: this.grid.cards }]
+    for (const section of sections) {
+      if (section.title) size++
+      const heights = section.cards.map(({ entity }) => byEntity.get(entity) ?? 1)
+      for (let i = 0; i < heights.length; i += columns)
+        size += Math.max(...heights.slice(i, i + columns))
+    }
     const contentSize =
       size ||
       (this.config?.show_empty === false &&
@@ -152,13 +159,22 @@ export class AutoGrid extends LitElement {
         </div></ha-card
       >`
     }
-    return html`<div class="grid">
-      ${repeat(
-        this.grid.cards,
-        ({ entity }) => entity,
-        ({ card }) => html`<div class="cell">${card}</div>`
-      )}
-    </div>`
+    const sections = this.grid.sections ?? [{ key: "ungrouped", title: "", cards: this.grid.cards }]
+    return html`${repeat(
+      sections,
+      ({ key }) => key,
+      (section) =>
+        html` <section class="section">
+          ${section.title ? html`<h2 class="group-header">${section.title}</h2>` : nothing}
+          <div class="grid">
+            ${repeat(
+              section.cards,
+              ({ entity }) => entity,
+              ({ card }) => html`<div class="cell">${card}</div>`
+            )}
+          </div>
+        </section>`
+    )} `
   }
 
   static styles = css`
@@ -179,6 +195,17 @@ export class AutoGrid extends LitElement {
       line-height: var(--ha-line-height-condensed, 1.2);
       display: block;
       padding: 24px 16px 16px;
+    }
+    .section + .section {
+      margin-top: 16px;
+    }
+    .group-header {
+      color: var(--secondary-text-color);
+      font-size: var(--ha-font-size-m, 16px);
+      font-weight: var(--ha-font-weight-medium, 500);
+      line-height: var(--ha-line-height-normal, 1.5);
+      margin: 0;
+      padding: 8px;
     }
     .grid {
       display: grid;

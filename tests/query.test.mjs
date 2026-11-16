@@ -4,7 +4,7 @@ import { fieldValue, normalizeConfig, normalizeMatches } from "../src/query.ts"
 
 const query = (include, extra = {}) => normalizeConfig({ include, ...extra }).query.template
 
-test("defaults to two columns of tiles and include/name sorting without mutating input", () => {
+test("defaults to two columns of tiles and name sorting without mutating input", () => {
   const input = { include: { area: "pool", domain: "light" }, card: { name: { type: "entity" } } }
   const original = structuredClone(input)
   const config = normalizeConfig(input)
@@ -77,7 +77,7 @@ test("explicit sort replaces defaults; empty sorts disable all sorting including
 test("sort strings and mixed lists compile identically to their expanded forms", () => {
   const include = { domain: "sensor" }
   for (const by of [
-    "include",
+    "group",
     "entity_id",
     "name",
     "state",
@@ -96,11 +96,11 @@ test("sort strings and mixed lists compile identically to their expanded forms",
   ]) {
     assert.equal(query(include, { sort: by }), query(include, { sort: { by } }))
   }
-  assert.equal(query(include, { sort: ["include", "name"] }), query(include))
+  assert.equal(query(include, { sort: "name" }), query(include))
   assert.equal(
-    query(include, { sort: ["include", { by: "attr.battery", numeric: true }, "name"] }),
+    query(include, { sort: ["group", { by: "attr.battery", numeric: true }, "name"] }),
     query(include, {
-      sort: [{ by: "include" }, { by: "attr.battery", numeric: true }, { by: "name" }],
+      sort: [{ by: "group" }, { by: "attr.battery", numeric: true }, { by: "name" }],
     })
   )
   for (const sort of [
@@ -139,7 +139,7 @@ test("fieldValue supplies every sortable filter field and optional by defaults t
   for (const field of fields) {
     assert.ok(query({ domain: "sensor" }, { sort: field }).includes(fieldValue(field, 0)), field)
   }
-  assert.equal(fieldValue("include", 12), "12")
+  assert.equal(fieldValue("group", 12), "ag_groups[12]")
   assert.equal(query({}, { sort: {} }), query({}, { sort: "name" }))
   assert.equal(
     query({}, { sort: { reverse: true } }),
@@ -316,7 +316,7 @@ test("quotes user input rather than interpolating Jinja source", () => {
 test("limits, numeric comparison, and multi-sort are compiled into the backend query", () => {
   const template = query(
     { domain: "sensor", state: "< 20" },
-    { sort: [{ by: "include" }, { by: "state", numeric: true, reverse: true }], limit: 5 }
+    { sort: [{ by: "group" }, { by: "state", numeric: true, reverse: true }], limit: 5 }
   )
   assert.match(template, /is_number\(states\(entity\)\)/)
   assert.match(template, /float\) < 20/)

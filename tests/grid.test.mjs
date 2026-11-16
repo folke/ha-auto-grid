@@ -344,3 +344,66 @@ test("identical queries share subscriptions even with different card configurati
   await tick()
   assert.equal(f.stops, 1)
 })
+
+test("group title and membership changes preserve cards and update sections", async () => {
+  const f = fixture()
+  f.grid.configure(normalizeConfig({ include: { domain: "light" }, group: "area" }))
+  f.grid.connect()
+  const section = (value, title, entities) => ({
+    value,
+    title,
+    matches: entities.map((entity) => ({ entity, group: 0 })),
+  })
+  f.emit([section("Pool", "Pool", ["light.a"]), section("Other", "Other", ["light.b"])])
+  await tick()
+  const [a, b] = f.grid.cards.map(({ card }) => card)
+  const updates = f.updates
+  f.emit([section("Pool", "Renamed", ["light.a"]), section("Other", "Other", ["light.b"])])
+  await tick()
+  assert.equal(f.updates, updates + 1)
+  assert.equal(f.grid.sections[0].title, "Renamed")
+  assert.equal(f.grid.sections[0].cards[0].card, a)
+  f.emit([section("Other", "Other", ["light.a", "light.b"])])
+  await tick()
+  assert.equal(f.grid.sections.length, 1)
+  assert.deepEqual(
+    f.grid.sections[0].cards.map(({ card }) => card),
+    [a, b]
+  )
+  assert.equal(f.created.length, 2)
+  const unchanged = f.updates
+  f.emit([section("Other", "Other", ["light.a", "light.b"])])
+  await tick()
+  assert.equal(f.updates, unchanged)
+  f.grid.disconnect()
+})
+
+test("grouped card configuration changes use the retained raw selection", async () => {
+  const f = fixture()
+  const config = { include: { domain: "light" }, group: true }
+  f.grid.configure(normalizeConfig(config))
+  f.grid.connect()
+  f.emit([{ value: 0, title: "0", matches: [{ entity: "light.a", group: 0 }] }])
+  await tick()
+  f.grid.configure(normalizeConfig({ ...config, card: { type: "button" } }))
+  await tick()
+  assert.equal(f.subscriptions.length, 1)
+  assert.equal(f.grid.sections[0].cards[0].card.config.type, "button")
+  f.grid.disconnect()
+})
+
+test("pending integration metadata never opens a subscription after disconnection", async () => {
+  const f = fixture()
+  let finish
+  f.hass.connection.sendMessagePromise = () =>
+    new Promise((resolve) => {
+      finish = resolve
+    })
+  f.grid.configure(normalizeConfig({ include: { domain: "light" }, group: "integration" }))
+  f.grid.connect()
+  await tick()
+  f.grid.disconnect()
+  finish([{ domain: "mqtt", name: "MQTT" }])
+  await tick()
+  assert.equal(f.subscriptions.length, 0)
+})
