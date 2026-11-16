@@ -90,6 +90,7 @@ for case in payload:
         entity_name=entity_name,
         area_name=lambda entity: entity_area(entity).get("name"),
         floor_name=lambda entity: case.get("floors", {}).get(entity_area(entity).get("floor_id"), {}).get("name"),
+        device_id=lambda entity: case.get("registry", {}).get(entity, {}).get("device_id"),
         device_name=lambda entity: entity_device(entity).get("name_by_user") or entity_device(entity).get("name"),
         labels=lambda entity: case.get("registry", {}).get(entity, {}).get("labels", []),
         config_entry_id=lambda entity: case.get("registry", {}).get(entity, {}).get("config_entry_id"),

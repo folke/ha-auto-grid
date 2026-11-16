@@ -26,7 +26,6 @@ test(
     const memberships = {
       "area:pool": ["light.pool", "light.deck", "sensor.low", "light.disabled"],
       "label:outside": ["light.deck"],
-      "device:device_id": ["sensor.low", "sensor.high"],
       "floor:ground": ["light.hall", "light.pool"],
     }
     const cases = [
@@ -114,6 +113,11 @@ test(
       template: compileFilter(filter, sort, limit),
       states,
       memberships,
+      registry: {
+        "sensor.low": { device_id: "device_id", entity_name: "Low" },
+        "sensor.high": { device_id: "device_id", entity_name: "High" },
+      },
+      devices: { device_id: { name: "Device" } },
     }))
     const result = spawnSync(
       "python3",

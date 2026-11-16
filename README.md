@@ -214,7 +214,7 @@ one Jinja query and subscribed through HA's `render_template` WebSocket API.
 | -------------- | -------------------------------------------------------------------- |
 | `area`         | Area ID/name, or a list                                              |
 | `floor`        | Floor ID/name, or a list                                             |
-| `device`       | Device ID, or a list                                                 |
+| `device`       | Device ID or effective name; exact, wildcard, `/regex/`, or a list   |
 | `label`        | Label ID/name, or a list                                             |
 | `domain`       | Exact domain name, or a list, e.g. `light`                           |
 | `entity_id`    | Exact ID, wildcard, `/regex/`, or a list                             |
@@ -230,8 +230,28 @@ one Jinja query and subscribed through HA's `render_template` WebSocket API.
 | `any`          | List of filters, at least one must match                             |
 | `not`          | A filter that must not match, or a list where none may match         |
 
-Area/floor/device/label membership uses HA's corresponding `*_entities()` helper
-semantics. An area includes entities assigned through a device.
+Area/floor/label membership uses HA's corresponding `*_entities()` helper semantics.
+An area includes entities assigned through a device.
+
+`device` matches either HA's `device_id(entity)` or its effective `device_name(entity)`.
+The effective name prefers a user-assigned name; after a rename, the original name is
+not also matched. IDs and names use the same exact/glob/regex syntax, and lists match
+any entry. Entities without a device do not match.
+
+```yaml
+include:
+  domain: device_tracker
+  integration: omada_open_api
+  any:
+    - device: /Pixel|Xiaomi/
+    - name: /Pixel|Xiaomi/
+```
+
+Device rules do not narrow candidates with `device_entities()`: an exact-looking ID
+can also be another device's name. Scoping by integration, area, explicit entity IDs,
+or domain/type still narrows selection safely. A device-only query scans all states
+and may therefore be subject to HA's broad-template rate limit. Device sorting and
+grouping continue to use the effective display name.
 
 `type` mirrors HA's entity-type selection: a bare domain matches every entity in that
 domain, even when it has a device class. A qualified type matches both parts exactly:
@@ -461,7 +481,7 @@ implement per-card column/row spans. Grid spacing can be customized with the
 
 ### Backend trade-offs
 
-The compiler narrows candidates to an area/device/label/floor/integration, explicit IDs, or domains
+The compiler narrows candidates to an area/label/floor/integration, explicit IDs, or domains/types
 where it can do so safely. Membership helpers are evaluated once per template render,
 not once per entity. OR/NOT-only queries may require a full state scan.
 

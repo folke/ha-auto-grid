@@ -150,10 +150,20 @@ function validateFilter(filter: Filter, depth = 0): void {
 function predicate(filter: Filter, sets: Map<string, string>): string {
   const expressions: string[] = []
   for (const [key, value] of Object.entries(filter)) {
-    if (["area", "floor", "device", "label", "integration"].includes(key)) {
+    if (["area", "floor", "label", "integration"].includes(key)) {
       const source = membership(key, strings(value, key))
       if (!sets.has(source)) sets.set(source, `ag_members_${sets.size}`)
       expressions.push(`entity in ${sets.get(source)}`)
+    } else if (key === "device") {
+      expressions.push(
+        join(
+          [
+            match("device_id(entity)", value as Selection),
+            match(fieldValue("device", 0), value as Selection),
+          ],
+          "or"
+        )
+      )
     } else if (key === "domain") {
       expressions.push(`${fieldValue("domain", 0)} in ${JSON.stringify(strings(value, key))}`)
     } else if (key === "type") {
@@ -192,7 +202,7 @@ function predicate(filter: Filter, sets: Map<string, string>): string {
 
 // A restriction in an AND branch is a safe candidate set. Restrictions under OR/NOT aren't.
 function candidates(filter: Filter): string {
-  for (const key of ["area", "device", "label", "floor", "integration"] as const) {
+  for (const key of ["area", "label", "floor", "integration"] as const) {
     if (filter[key] !== undefined) return membership(key, strings(filter[key], key))
   }
   if (filter.entity_id !== undefined) {
