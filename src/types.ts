@@ -5,6 +5,7 @@ export interface LovelaceCard extends HTMLElement {
   preview?: boolean
   layout?: string
   getCardSize?(): number | Promise<number>
+  setConfig?(config: CardConfig): void
 }
 
 export interface TemplateResult {
@@ -88,6 +89,12 @@ export interface AutoGridConfig {
 export interface QueryMatch {
   entity: string
   group: number
+  values?: string[]
+}
+
+export interface CardTemplate {
+  path: (string | number)[]
+  source: string
 }
 
 export type GroupValue =
@@ -113,6 +120,7 @@ export interface QueryResult {
 export interface CompiledQuery {
   template: string
   cards: CardConfig[]
+  templates: CardTemplate[][]
   group?: GroupConfig
 }
 

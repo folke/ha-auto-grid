@@ -1,6 +1,8 @@
+import { compileCardOptions, mergeCardOptions, validateCardOptions } from "./card-templates.ts"
 import type {
   AutoGridConfig,
   CardConfig,
+  CardTemplate,
   Filter,
   FilterField,
   GridConfig,
@@ -175,6 +177,14 @@ function predicate(filter: Filter, sets: Map<string, string>): string {
           "or"
         )
       )
+    } else if (key === "state") {
+      const values = Array.isArray(value) ? value : [value]
+      expressions.push(
+        match(
+          fieldValue("state", 0),
+          values.map((v) => (v === true ? "on" : v === false ? "off" : v)) as Selection
+        )
+      )
     } else if (key === "hidden") {
       const target = fieldValue(key, 0)
       expressions.push(value ? target : `not ${target}`)
@@ -289,13 +299,25 @@ function numericSort(sort: NormalizedSort): boolean {
   return sort.numeric === true || ["hidden", "last_changed", "last_updated"].includes(sort.by)
 }
 
+function jinjaValue(value: unknown): string {
+  if (value === null || value === undefined) return "none"
+  if (typeof value === "string" || typeof value === "boolean") return JSON.stringify(value)
+  if (typeof value === "number" && Number.isFinite(value)) return String(value)
+  if (Array.isArray(value)) return `[${value.map(jinjaValue).join(", ")}]`
+  object(value, "Template config value")
+  return `{${Object.entries(value)
+    .map(([key, child]) => `${JSON.stringify(key)}: ${jinjaValue(child)}`)
+    .join(", ")}}`
+}
+
 function compileQuery(
   includes: Filter[],
   excludes: Filter[],
   sorts: NormalizedSort[],
   limit: number | undefined,
   groupConfig: GroupConfig | undefined,
-  groupNames: (string | number)[]
+  groupNames: (string | number)[],
+  options: { context: Partial<CardConfig>; templates: CardTemplate[] }[]
 ): string {
   const sets = new Map<string, string>()
   const exclusion = join(
@@ -337,6 +359,28 @@ function compileQuery(
     ].join("\n")
   })
   const lines = [...sets].map(([expression, name]) => `{% set ${name} = ${expression} %}`)
+  options.forEach(({ templates }, group) =>
+    templates.forEach(({ source }, index) => {
+      lines.push(
+        `{% macro ag_option_${group}_${index}(entity, config, area, group, group_name, group_count) -%}${source}{%- endmacro %}`
+      )
+    })
+  )
+  const matchLines = (row: string): string[] => {
+    const result = [`{% set ag_match = {'entity': ${row}.entity, 'group': ${row}.group} %}`]
+    options.forEach(({ context, templates }, group) => {
+      if (!templates.length) return
+      result.push(
+        `{% if ${row}.group == ${group} %}`,
+        `{% set config = dict(${jinjaValue(context)}, entity=${row}.entity) %}`,
+        "{% set area = config.get('area') %}",
+        `{% set ag_values = [${templates.map((_, index) => `(ag_option_${group}_${index}(${row}.entity, config, area, group, group_name, group_count) | trim)`).join(", ")}] %}`,
+        "{% set ag_match = dict(ag_match, values=ag_values) %}",
+        "{% endif %}"
+      )
+    })
+    return result
+  }
   if (sorts.some((sort) => sort.by === "group") || groupConfig?.by === "group") {
     lines.push(`{% set ag_groups = [${groupNames.map(literal).join(", ")}] %}`)
   }
@@ -384,7 +428,8 @@ function compileQuery(
       `{% set group_name = ${fieldTitle(groupConfig.by)} %}`,
       "{% set members = namespace(rows=[]) %}",
       "{% for member in ag_rows | selectattr('bucket_key', 'eq', row.bucket_key) %}",
-      "{% set members.rows = members.rows + [{'entity': member.entity, 'group': member.group}] %}",
+      ...matchLines("member"),
+      "{% set members.rows = members.rows + [ag_match] %}",
       "{% endfor %}",
       "{% set title = ag_title(row.entity, states[row.entity], group, group_name, group_count) | trim %}",
       "{% set sections.rows = sections.rows + [{'key': row.bucket_key, 'value': group, 'title': title, 'matches': members.rows}] %}",
@@ -394,9 +439,11 @@ function compileQuery(
     )
   } else {
     lines.push(
+      "{% set group = none %}{% set group_name = '' %}{% set group_count = 0 %}",
       "{% set result = namespace(rows=[]) %}",
       "{% for row in ag_rows %}",
-      "{% set result.rows = result.rows + [{'entity': row.entity, 'group': row.group}] %}",
+      ...matchLines("row"),
+      "{% set result.rows = result.rows + [ag_match] %}",
       "{% endfor %}",
       "{{ result.rows }}"
     )
@@ -423,7 +470,17 @@ export function normalizeMatches(value: unknown, groupCount: number): QueryMatch
     }
     if (!seen.has(row.entity)) {
       seen.add(row.entity)
-      matches.push({ entity: row.entity, group: row.group })
+      if (
+        row.values !== undefined &&
+        (!Array.isArray(row.values) || row.values.some((v) => typeof v !== "string"))
+      ) {
+        throw new Error("Card template values must be strings")
+      }
+      matches.push({
+        entity: row.entity,
+        group: row.group,
+        ...(row.values === undefined ? {} : { values: row.values as string[] }),
+      })
     }
   }
   return matches
@@ -474,14 +531,6 @@ function filters<T extends Filter>(value: T | T[], name: string): T[] {
   return result
 }
 
-function validateCard(card: unknown): asserts card is Partial<CardConfig> {
-  object(card, "card")
-  if ("entity" in card) throw new Error("card.entity is supplied by the query")
-  if ("type" in card && (typeof card.type !== "string" || !card.type.trim())) {
-    throw new Error("card.type must be a non-empty string")
-  }
-}
-
 function normalizeGroup(value: AutoGridConfig["group"]): GroupConfig | undefined {
   if (value === undefined || value === false) return undefined
   if (value === true) return { by: "group", title: "{{ group_name }}" }
@@ -523,10 +572,10 @@ export function normalizeConfig(input: AutoGridConfig): GridConfig {
   if (config.include === undefined) throw new Error("include is required")
   const includes = filters<Include>(config.include, "include")
   const excludes = config.exclude === undefined ? [] : filters(config.exclude, "exclude")
-  const card: CardConfig = { type: "tile" }
+  let card: CardConfig = { type: "tile" }
   if (config.card !== undefined) {
-    validateCard(config.card)
-    Object.assign(card, config.card)
+    validateCardOptions(config.card)
+    card = mergeCardOptions(card, config.card)
   }
   const includeFilters: Filter[] = []
   const groupNames: (string | number)[] = []
@@ -537,10 +586,11 @@ export function normalizeConfig(input: AutoGridConfig): GridConfig {
     groupNames.push(group ?? index)
     validateFilter(filter)
     includeFilters.push(filter)
-    if (override !== undefined) validateCard(override)
-    return { ...card, ...override }
+    if (override !== undefined) validateCardOptions(override)
+    return mergeCardOptions(card, override ?? {})
   })
   excludes.forEach((exclude) => validateFilter(exclude))
+  const plans = cards.map(compileCardOptions)
   const group = normalizeGroup(config.group)
   const sorts =
     config.sort === undefined
@@ -566,9 +616,11 @@ export function normalizeConfig(input: AutoGridConfig): GridConfig {
         normalizedSorts,
         config.limit,
         group,
-        groupNames
+        groupNames,
+        plans
       ),
-      cards,
+      cards: plans.map((plan) => plan.card),
+      templates: plans.map((plan) => plan.templates),
       group,
     },
   }

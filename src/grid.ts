@@ -1,4 +1,5 @@
 import { normalizeResult } from "./query.ts"
+import { renderCardOptions } from "./card-templates.ts"
 import { integrationNames } from "./integrations.ts"
 import { subscribeTemplate } from "./subscriptions.ts"
 import type {
@@ -12,7 +13,7 @@ import type {
 } from "./types.ts"
 
 type CreateCard = (config: CardConfig) => Promise<LovelaceCard>
-type GridCard = QueryMatch & { card: LovelaceCard; configKey: string }
+type GridCard = QueryMatch & { card: LovelaceCard; configKey: string; cardType: string }
 export type GridSection = { key: string; value: GroupValue; title: string; cards: GridCard[] }
 
 export class GridController {
@@ -41,7 +42,8 @@ export class GridController {
   configure(config: GridConfig): void {
     const queryChanged = this.config?.query.template !== config.query.template
     const cardsChanged =
-      JSON.stringify(this.config?.query.cards) !== JSON.stringify(config.query.cards)
+      JSON.stringify([this.config?.query.cards, this.config?.query.templates]) !==
+      JSON.stringify([config.query.cards, config.query.templates])
     this.config = config
     if (queryChanged) {
       this.selection = undefined
@@ -120,7 +122,12 @@ export class GridController {
       this.selection = value
       const signature = JSON.stringify(result.sections)
       const requests = matches.map((match) => {
-        const config = this.config!.query.cards[match.group]
+        const config = renderCardOptions(
+          this.config!.query.cards[match.group],
+          this.config!.query.templates[match.group],
+          match.values,
+          match.entity
+        )
         return { ...match, config, configKey: JSON.stringify(config) }
       })
       const unchanged =
@@ -145,17 +152,31 @@ export class GridController {
       const cards = await Promise.all(
         requests.map(async ({ entity, group, config, configKey }) => {
           const existing = this.cache.get(entity)
+          const update =
+            existing !== undefined &&
+            existing.configKey !== configKey &&
+            existing.cardType === config.type &&
+            typeof existing.card.setConfig === "function"
           const card =
-            existing?.configKey === configKey
+            existing && (existing.configKey === configKey || update)
               ? existing.card
-              : await this.create({ ...structuredClone(config), entity })
-          return { entity, group, card, configKey }
+              : await this.create(structuredClone(config))
+          return { entity, group, card, configKey, cardType: config.type, update, config }
         })
       )
       if (!this.active || revision !== this.revision) return
-      for (const { card } of cards) card.hass = this.hass!
-      this.cache = new Map(cards.map((entry) => [entry.entity, entry]))
-      this.cards = cards
+      for (const { card, update, config } of cards) {
+        if (update) card.setConfig!(structuredClone(config))
+        card.hass = this.hass!
+      }
+      this.cards = cards.map(({ entity, group, card, configKey, cardType }) => ({
+        entity,
+        group,
+        card,
+        configKey,
+        cardType,
+      }))
+      this.cache = new Map(this.cards.map((entry) => [entry.entity, entry]))
       this.setSections(result, signature)
       this.loading = false
       this.error = undefined

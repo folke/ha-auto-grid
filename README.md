@@ -64,7 +64,10 @@ filter are **AND**; include groups are **OR**. Each entity produces only one car
 An include group may override the global `card`. The merge is shallow:
 `{ type: "tile", ...globalCard, ...groupCard, entity }`. Nested objects and arrays
 replace inherited values; they are not recursively merged. Each child gets an
-independent copy. The `entity` field is reserved and cannot be configured in `card`.
+independent copy. The `entity` field is reserved and cannot be configured in `card`,
+including as `$entity`. For templated options, overrides use the destination key:
+a per-include `$name` overrides a global `name`, and a per-include `name` replaces
+an inherited `$name`.
 
 `exclude` accepts a filter or list of filters. Matching **any** exclusion removes the
 entity globally, regardless of which include group selected it. A `not` rule inside
@@ -106,6 +109,90 @@ sort: []
 
 `sort: []` preserves the supplied order. `include: []` selects nothing; `include: {}`
 selects every entity with a state. Be mindful of HA's rate limits for broad queries.
+
+## Explicit card-option templates
+
+Prefix a property name with `$` to have **Auto Grid** evaluate its value as Jinja.
+The generated card receives the normal property name without `$`:
+
+```yaml
+card:
+  type: custom:mushroom-template-card
+  primary: "{{ entity_name(entity) }}" # Mushroom owns this template; untouched
+  tap_action:
+    action: url
+    $url_path: >-
+      {{ 'https://dockge.folke.io/compose/' ~
+         (state_attr(entity, 'stack') | urlencode) }}
+```
+
+Only `$` keys opt in. Unprefixed strings, including Jinja intended for Mushroom or
+another custom card, pass through unchanged. Nested objects and objects inside arrays
+are supported. Each `$` value must be a string; rendered output is a string with outer
+whitespace trimmed, not parsed as JSON, a number, a boolean, or an object. Mark scalar
+fields such as `$url_path`, not an entire action object. A static value is also valid.
+
+`url_path` and `$url_path` cannot appear in the same object. Empty `$` keys and doubled
+prefixes such as `$$name` are rejected. Per-include overrides still merge shallowly,
+but recognize `name` and `$name` as the same destination property.
+
+Templates receive:
+
+- `entity`: the selected entity ID string, matching Mushroom's convention.
+- `config`: the effective static card configuration, with the selected `entity`
+  injected. Ordinary strings/templates remain literal; `$` properties are excluded.
+- `area`: the statically configured `config.area`, or `none` when absent/templated.
+- `group`, `group_name`, `group_count`: the current visual group's values when grouping
+  is enabled; otherwise `none`, an empty string, and `0`, respectively.
+
+Templates do **not** depend on evaluation order: `$area` does not become `area` for a
+sibling `$name`, nor do rendered values get injected into `config` for other templates.
+Use entity attributes or static `config` values for shared inputs.
+
+Values render in the existing backend query **after selection, exclusions, sorting,
+and limiting**, for the winning include only. There are no per-card/per-field Auto Grid
+subscriptions. Cards with unchanged effective options are left alone; changed options
+call that child's `setConfig()` when available. Changing `type` replaces the element.
+
+### Container update links
+
+This example needs only native tiles; Auto Grid computes the different action URL
+for each selected entity:
+
+```yaml
+type: custom:auto-grid
+title: Container Updates
+columns: 2
+include:
+  type: update
+  entity_id: "update.wud_*"
+  state: "on"
+  attr.stack: "/.+/"
+  attr.watcher:
+    - dockge
+    - servarr
+    - frigate
+card:
+  type: tile
+  tap_action:
+    action: url
+    $url_path: >-
+      {% set watcher = state_attr(entity, 'watcher') %}
+      {% set base = 'https://servarr.folke.io'
+         if watcher == 'servarr' else 'https://dockge.folke.io' %}
+      {% set suffix = '/10.0.0.6:5001' if watcher == 'frigate' else '' %}
+      {{ base }}/compose/{{ state_attr(entity, 'stack') | urlencode }}{{ suffix }}
+  hold_action:
+    action: more-info
+  icon_tap_action:
+    action: more-info
+```
+
+Static card configuration stays in the frontend. When opting into `$` templates, the
+static configuration for those includes is embedded in the backend query to provide
+`config`; only the rendered values are sent back alongside entity IDs. Editing that
+context or the templates may therefore reopen the query. Syntax/runtime template
+errors use the card's normal error display and Retry flow.
 
 ## Grouping
 
@@ -351,7 +438,14 @@ not:
 `not: []` rejects nothing; `not: {}` rejects everything. Nested `any`, `all`, and
 `not` rules work in both includes and exclusions.
 
-Quote `"on"` and `"off"` in YAML. For low batteries:
+For `state` only, YAML booleans normalize to HA's raw state strings: `true` → `"on"`,
+`false` → `"off"`. This also handles parsers treating unquoted `on`/`off` as booleans.
+It applies in includes, exclusions, nested rules, and lists such as
+`state: [true, unavailable]`. Attribute booleans remain actual boolean comparisons.
+This is not an "active" abstraction: covers still need `state: open`, locks need
+`state: unlocked`, and so on. Quoted `"on"`/`"off"` are always unambiguous.
+
+For low batteries:
 
 ```yaml
 type: custom:auto-grid
@@ -366,7 +460,8 @@ limit: 8
 ```
 
 Raw selection templates, nested attribute paths, translated-state matching, relative-time
-rules, and per-group sorting/pagination are not implemented. Heading templates are supported. Unknown filter rules
+rules, and per-group sorting/pagination are not implemented. Heading and explicit `$`
+card-option templates are supported. Unknown filter rules
 are rejected. The earlier `filter`, `entities`, and `options` fields have been replaced
 by `include`/`exclude` and `card`; old configurations produce a migration error.
 The previous `attributes: { battery: ... }` notation is now `attr.battery: ...`;
@@ -478,17 +573,20 @@ be customized with the `--auto-grid-gap` CSS property; otherwise it uses HA's
 ## Performance and lifecycle
 
 - One backend query returns entity IDs and winning include-rule indexes, optionally
-  organized into typed groups with rendered titles. Card configuration is never sent
-  to the backend. There are no per-heading template subscriptions.
+  with rendered `$` values and organized into typed groups with rendered titles.
+  Static configuration remains frontend-only unless opted into template `config`
+  context. There are no per-heading or per-option template subscriptions.
 - Identical generated queries share one subscription per HA connection, even when
   their frontend card configurations differ.
 - Ordinary `hass` updates only forward state to existing child cards. They do not run
   filters, call child `setConfig()`, or re-render the grid.
 - Membership/order changes, including moves between visual groups, reuse cards by
   entity ID and effective configuration.
-  A winning-group change only replaces a card if its effective configuration changes.
-- Editing card configuration only recreates affected children, without reopening the
-  query. Removed cards are released.
+  A winning-group change does not reconfigure a card with identical effective options.
+- Configuration changes update affected cards in place via `setConfig()`, replacing
+  them only when their type changes or they cannot be reconfigured. Removed cards
+  are released. Static card-only edits do not reopen the query; `$` templates and
+  their static `config` context participate in the query.
 - Stale async card creation cannot overwrite newer results or mount after disconnection.
 - Disconnecting releases the subscription; reconnecting obtains fresh results and
   reuses retained cards. The last active consumer closes a shared subscription.

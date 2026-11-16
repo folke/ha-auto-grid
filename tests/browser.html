@@ -21,6 +21,7 @@
         let created = 0
         class TestTile extends HTMLElement {
           setConfig(config) {
+            this.setCount = (this.setCount ?? 0) + 1
             this.config = config
             this.textContent = config.entity
           }
@@ -395,6 +396,67 @@
         )
         first.remove()
         second.remove()
+        await tick()
+        const dynamic = document.createElement("auto-grid")
+        const dynamicIndex = subscriptions.length
+        dynamic.setConfig({
+          include: { type: "update" },
+          card: {
+            type: "custom:mushroom-template-card",
+            primary: "{{ entity_name(entity) }}",
+            tap_action: { action: "url", $url_path: "{{ state_attr(entity, 'url') }}" },
+          },
+        })
+        dynamic.hass = hass
+        document.body.append(dynamic)
+        await tick()
+        assert(
+          subscriptions.length === dynamicIndex + 1,
+          "dynamic options use only the existing query subscription"
+        )
+        const dynamicResult = (values) =>
+          subscriptions[dynamicIndex].callback({
+            result: [{ entity: "update.container", group: 0, values }],
+          })
+        dynamicResult(["https://example.com/first"])
+        await tick()
+        const dynamicTile = dynamic.shadowRoot.querySelector("test-tile")
+        const dynamicCreated = created
+        assert(
+          dynamicTile.config.primary === "{{ entity_name(entity) }}",
+          "Mushroom templates pass through unchanged"
+        )
+        assert(
+          dynamicTile.config.tap_action.url_path === "https://example.com/first" &&
+            !("$url_path" in dynamicTile.config.tap_action),
+          "$ keys become rendered destination properties"
+        )
+        dynamicResult(["https://example.com/second"])
+        await tick()
+        assert(
+          dynamic.shadowRoot.querySelector("test-tile") === dynamicTile &&
+            created === dynamicCreated &&
+            dynamicTile.setCount === 2,
+          "changed URL reconfigures rather than recreates the native card"
+        )
+        dynamicResult(["https://example.com/second"])
+        await tick()
+        assert(dynamicTile.setCount === 2, "identical rendered options do not call setConfig")
+        let dynamicMutations = 0
+        const dynamicObserver = new MutationObserver(() => dynamicMutations++)
+        dynamicObserver.observe(dynamic.shadowRoot, {
+          childList: true,
+          attributes: true,
+          subtree: true,
+        })
+        for (let i = 0; i < 40; i++) dynamic.hass = { ...hass, states: { generation: i } }
+        await tick()
+        assert(
+          dynamicMutations === 0 && dynamicTile.setCount === 2,
+          "ordinary hass updates don't process templates or mutate the DOM"
+        )
+        dynamicObserver.disconnect()
+        dynamic.remove()
         await tick()
         observer.disconnect()
         grid.remove()

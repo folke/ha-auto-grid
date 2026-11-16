@@ -407,3 +407,111 @@ test("pending integration metadata never opens a subscription after disconnectio
   await tick()
   assert.equal(f.subscriptions.length, 0)
 })
+
+test("changed rendered options update only affected cards, with no ordinary hass work", async () => {
+  const created = []
+  const f = fixture(async (config) => {
+    const card = {
+      config,
+      updates: 0,
+      setConfig(next) {
+        this.config = next
+        this.updates++
+      },
+    }
+    created.push(card)
+    return card
+  })
+  f.grid.configure(
+    normalizeConfig({ include: { type: "light" }, card: { $name: "{{ states(entity) }}" } })
+  )
+  f.grid.connect()
+  const rows = [
+    { entity: "light.a", group: 0, values: ["on"] },
+    { entity: "light.b", group: 0, values: ["off"] },
+  ]
+  f.emit(rows)
+  await tick()
+  const [a, b] = created
+  f.emit(rows)
+  await tick()
+  for (let i = 0; i < 20; i++) f.grid.setHass({ ...f.hass, states: { generation: i } })
+  assert.equal(a.updates, 0)
+  f.emit([{ ...rows[0], values: ["off"] }, rows[1]])
+  await tick()
+  assert.equal(f.grid.cards[0].card, a)
+  assert.equal(created.length, 2)
+  assert.equal(a.updates, 1)
+  assert.equal(a.config.name, "off")
+  assert.equal(b.updates, 0)
+  assert.equal(f.subscriptions.length, 1)
+  f.emit([{ ...rows[0], values: [] }])
+  await tick()
+  assert.match(f.grid.error, /template values/)
+  assert.equal(a.updates, 1)
+  f.grid.disconnect()
+})
+
+test("a rendered card type change replaces rather than reconfigures the element", async () => {
+  const created = []
+  const f = fixture(async (config) => {
+    const card = {
+      config,
+      updates: 0,
+      setConfig() {
+        this.updates++
+      },
+    }
+    created.push(card)
+    return card
+  })
+  f.grid.configure(normalizeConfig({ include: { type: "light" }, card: { $type: "{{ 'tile' }}" } }))
+  f.grid.connect()
+  f.emit([{ entity: "light.a", group: 0, values: ["tile"] }])
+  await tick()
+  f.emit([{ entity: "light.a", group: 0, values: ["button"] }])
+  await tick()
+  assert.equal(created.length, 2)
+  assert.equal(created[0].updates, 0)
+  assert.equal(f.grid.cards[0].card, created[1])
+  assert.equal(created[1].config.type, "button")
+  f.grid.disconnect()
+})
+
+test("stale asynchronous selections cannot reconfigure retained cards", async () => {
+  let finish
+  const a = {
+    config: undefined,
+    updates: [],
+    setConfig(config) {
+      this.config = config
+      this.updates.push(config.name)
+    },
+  }
+  const f = fixture(async (config) => {
+    if (config.entity === "light.b")
+      return new Promise((resolve) => {
+        finish = () => resolve({ config })
+      })
+    a.config = config
+    return a
+  })
+  f.grid.configure(
+    normalizeConfig({ include: { type: "light" }, card: { $name: "{{ states(entity) }}" } })
+  )
+  f.grid.connect()
+  f.emit([{ entity: "light.a", group: 0, values: ["initial"] }])
+  await tick()
+  f.emit([
+    { entity: "light.a", group: 0, values: ["stale"] },
+    { entity: "light.b", group: 0, values: ["new"] },
+  ])
+  f.emit([{ entity: "light.a", group: 0, values: ["latest"] }])
+  await tick()
+  finish()
+  await tick()
+  assert.deepEqual(a.updates, ["latest"])
+  assert.equal(a.config.name, "latest")
+  assert.equal(f.grid.cards.length, 1)
+  f.grid.disconnect()
+})

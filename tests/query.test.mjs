@@ -223,6 +223,30 @@ test("not accepts a filter or list, rejecting malformed nested rules", () => {
   }
 })
 
+test("only state booleans normalize to on/off, including lists and nested exclusions", () => {
+  for (const [value, expected] of [
+    [true, "on"],
+    [false, "off"],
+    [
+      [true, false, "unavailable"],
+      ["on", "off", "unavailable"],
+    ],
+  ]) {
+    assert.equal(query({ state: value }), query({ state: expected }))
+    assert.equal(query({ not: { state: value } }), query({ not: { state: expected } }))
+    assert.equal(
+      query({}, { exclude: { any: [{ state: value }] } }),
+      query({}, { exclude: { any: [{ state: expected }] } })
+    )
+  }
+  assert.match(query({ "attr.flag": true }), /state_attr\(entity, "flag"\) == true/)
+  assert.match(query({ "attr.flag": false }), /state_attr\(entity, "flag"\) == false/)
+  const input = { include: { state: [true, false, "on"] } }
+  const before = structuredClone(input)
+  normalizeConfig(input)
+  assert.deepEqual(input, before)
+})
+
 test("per-group cards shallowly override defaults and never enter the backend query", () => {
   const config = normalizeConfig({
     card: { name: { type: "entity" }, features: [{ type: "light-brightness" }], icon: "mdi:pool" },
