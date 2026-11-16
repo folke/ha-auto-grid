@@ -288,7 +288,10 @@ export function fieldValue(field: SortField, include: number): string {
 }
 
 export function fieldTitle(field: SortField): string {
-  if (field === "type") return "group.split('/')[-1]"
+  if (field === "domain" || field === "type") {
+    const value = field === "type" ? "group.split('/')[-1]" : "group"
+    return `(${value}.split('_') | map('capitalize') | join(' '))`
+  }
   if (field === "integration") {
     return "((ag_integration_names | default({})).get(group, group) if group is not none else '')"
   }

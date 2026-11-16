@@ -36,7 +36,11 @@ test("entity type syntax is validated and narrows candidates to unique domains",
   assert.throws(() => normalizeConfig({ include: {}, sort: "device_class" }), /Unknown sort/)
   assert.throws(() => normalizeConfig({ include: {}, group: "device_class" }), /Unknown group/)
   assert.ok(query({}, { sort: "type" }).includes(fieldValue("type", 0)))
-  assert.equal(fieldTitle("type"), "group.split('/')[-1]")
+  assert.equal(
+    fieldTitle("type"),
+    "(group.split('/')[-1].split('_') | map('capitalize') | join(' '))"
+  )
+  assert.equal(fieldTitle("domain"), "(group.split('_') | map('capitalize') | join(' '))")
   assert.match(fieldTitle("integration"), /ag_integration_names/)
   assert.equal(fieldTitle("area"), "(group if group is not none else '')")
 })
@@ -102,11 +106,11 @@ test(
       [
         { include: selection, group: "type" },
         [
-          section("light", "light", ["light.a", "light.b"]),
-          section("sensor/battery", "battery", ["sensor.battery"]),
-          section("sensor/temperature", "temperature", ["sensor.temperature"]),
-          section("binary_sensor/battery", "battery", ["binary_sensor.battery"]),
-          section("sensor", "sensor", ["sensor.plain", "sensor.null", "sensor.empty"]),
+          section("light", "Light", ["light.a", "light.b"]),
+          section("sensor/battery", "Battery", ["sensor.battery"]),
+          section("sensor/temperature", "Temperature", ["sensor.temperature"]),
+          section("binary_sensor/battery", "Battery", ["binary_sensor.battery"]),
+          section("sensor", "Sensor", ["sensor.plain", "sensor.null", "sensor.empty"]),
         ],
       ],
       [
@@ -115,11 +119,11 @@ test(
           group: { by: "type", title: "{{ group_name }} / {{ group }} / {{ group_count }}" },
         },
         [
-          section("sensor/battery", "battery / sensor/battery / 3", ["sensor.battery"]),
-          section("sensor/temperature", "temperature / sensor/temperature / 3", [
+          section("sensor/battery", "Battery / sensor/battery / 3", ["sensor.battery"]),
+          section("sensor/temperature", "Temperature / sensor/temperature / 3", [
             "sensor.temperature",
           ]),
-          section("sensor", "sensor / sensor / 3", ["sensor.plain", "sensor.null", "sensor.empty"]),
+          section("sensor", "Sensor / sensor / 3", ["sensor.plain", "sensor.null", "sensor.empty"]),
         ],
       ],
       [
@@ -174,5 +178,81 @@ test(
         JSON.stringify(config)
       )
     )
+  }
+)
+
+test(
+  "domain/type headings prettify underscore-separated identifiers without changing values",
+  {
+    skip: python.status !== 0 ? "Optional check requires Python 3 with jinja2 installed" : false,
+  },
+  () => {
+    const states = {
+      "binary_sensor.a": {
+        name: "A",
+        state: "on",
+        attributes: { device_class: "carbon_monoxide", category: "raw_category" },
+      },
+      "device_tracker.b": { name: "B", state: "home", attributes: { category: "raw_category" } },
+      "sensor.c": {
+        name: "C",
+        state: "10",
+        attributes: { device_class: "volatile_organic_compounds", category: "raw_category" },
+      },
+    }
+    const include = { entity_id: Object.keys(states) }
+    const cases = [
+      [
+        { by: "domain" },
+        [
+          ["binary_sensor", "Binary Sensor"],
+          ["device_tracker", "Device Tracker"],
+          ["sensor", "Sensor"],
+        ],
+      ],
+      [
+        { by: "type" },
+        [
+          ["binary_sensor/carbon_monoxide", "Carbon Monoxide"],
+          ["device_tracker", "Device Tracker"],
+          ["sensor/volatile_organic_compounds", "Volatile Organic Compounds"],
+        ],
+      ],
+      [
+        { by: "type", title: "{{ group }}|{{ group_name }}" },
+        [
+          ["binary_sensor/carbon_monoxide", "binary_sensor/carbon_monoxide|Carbon Monoxide"],
+          ["device_tracker", "device_tracker|Device Tracker"],
+          [
+            "sensor/volatile_organic_compounds",
+            "sensor/volatile_organic_compounds|Volatile Organic Compounds",
+          ],
+        ],
+      ],
+      [{ by: "attr.category" }, [["raw_category", "raw_category"]]],
+    ]
+    const output = spawnSync(
+      "python3",
+      [fileURLToPath(new URL("./render-template.py", import.meta.url))],
+      {
+        input: JSON.stringify(
+          cases.map(([group]) => ({
+            states,
+            template: normalizeConfig({ include, group }).query.template,
+          }))
+        ),
+        encoding: "utf8",
+      }
+    )
+    assert.equal(output.status, 0, output.stderr)
+    JSON.parse(output.stdout).forEach((actual, i) =>
+      assert.deepEqual(
+        actual.result.map(({ value, title }) => [value, title]),
+        cases[i][1]
+      )
+    )
+    for (const field of ["area", "floor", "device", "label", "name", "group"]) {
+      assert.equal(fieldTitle(field), "(group if group is not none else '')")
+    }
   }
 )

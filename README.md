@@ -309,9 +309,11 @@ Available variables:
 
 - `group`: the literal grouping value.
 - `group_name`: its default display value. Usually the same as `group`, but integration
-  domains use manifest names (`mqtt` → `MQTT`) and entity types use their device class
-  (`sensor/battery` → `battery`) or domain when no class exists. Missing values use an
-  empty display value.
+  domains use manifest names (`mqtt` → `MQTT`). Domain/type headings split underscores
+  into words and capitalize each word (`binary_sensor` → `Binary Sensor`). Entity types
+  use the device class (`sensor/carbon_dioxide` → `Carbon Dioxide`) or the domain when
+  no class exists. Missing values use an empty display value. Other fields keep their
+  existing display values unchanged.
 - `group_count`: the total number of resulting groups after filtering, sorting, and
   the global limit (not the number of entities in this particular group).
 - `entity_id`: the first entity in the group after sorting and limiting.
@@ -408,9 +410,12 @@ group: type
   to the listed domains without scanning all states.
 - Type sorting/grouping uses the most specific value: `sensor/battery`,
   `sensor/temperature`, or just `sensor` when it has no device class.
-- Type headings use the device class (`battery`) or the domain (`sensor`), without
-  translating identifiers. `sensor/battery` and `binary_sensor/battery` remain
-  separate groups even though both headings read `battery`.
+- Type headings use the device class (`Battery`) or the domain (`Sensor`). Domain/type
+  titles split underscores and capitalize each part: `carbon_monoxide` becomes
+  `Carbon Monoxide`, `binary_sensor` becomes `Binary Sensor`. This is formatting, not
+  localization; raw grouping/filtering/sorting values remain unchanged.
+  `sensor/battery` and `binary_sensor/battery` stay separate groups even though both
+  headings read `Battery`.
 
 `domain` remains available for domain-only grouping/filtering. For device-class
 matching across domains, use `attr.device_class: battery`. The old `device_class`
