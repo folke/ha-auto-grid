@@ -1,6 +1,5 @@
 import { normalizeResult } from "./query.ts"
 import { renderCardOptions } from "./card-templates.ts"
-import { integrationNames } from "./integrations.ts"
 import { subscribeTemplate } from "./subscriptions.ts"
 import type {
   CardConfig,
@@ -40,7 +39,9 @@ export class GridController {
   }
 
   configure(config: GridConfig): void {
-    const queryChanged = this.config?.query.template !== config.query.template
+    const queryChanged =
+      this.config?.query.template !== config.query.template ||
+      JSON.stringify(this.config?.query.registries) !== JSON.stringify(config.query.registries)
     const cardsChanged =
       JSON.stringify([this.config?.query.cards, this.config?.query.templates]) !==
       JSON.stringify([config.query.cards, config.query.templates])
@@ -92,26 +93,28 @@ export class GridController {
     this.error = undefined
     this.changed()
     const connection = this.hass.connection
-    const template = this.config.query.template
-    const subscribe = (variables?: Record<string, unknown>) => {
-      if (!this.active || this.subscriptionToken !== token) return
-      this.dispose = subscribeTemplate(
-        connection,
-        template,
-        {
-          result: (value) => {
-            if (this.active && this.subscriptionToken === token) void this.select(value)
-          },
-          error: (error) => {
-            if (this.active && this.subscriptionToken === token) this.fail(error)
-          },
+    const query = this.config.query
+    this.dispose = subscribeTemplate(
+      connection,
+      query.template,
+      {
+        result: (value) => {
+          if (this.active && this.subscriptionToken === token) void this.select(value)
         },
-        variables
-      )
-    }
-    if (this.config.query.group?.by === "integration") {
-      void integrationNames(connection).then((names) => subscribe({ ag_integration_names: names }))
-    } else subscribe()
+        error: (error) => {
+          if (this.active && this.subscriptionToken === token) this.fail(error)
+        },
+        refresh: () => {
+          if (!this.active || this.subscriptionToken !== token) return
+          this.revision++
+          this.loading = true
+          this.error = undefined
+          this.changed()
+        },
+      },
+      undefined,
+      { registries: query.registries, integrationNames: query.group?.by === "integration" }
+    )
   }
 
   private async select(value: unknown): Promise<void> {

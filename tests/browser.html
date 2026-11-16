@@ -17,6 +17,7 @@
       }
       try {
         const subscriptions = []
+        const registrySubscriptions = []
         let stops = 0
         let created = 0
         class TestTile extends HTMLElement {
@@ -42,6 +43,13 @@
         })
         const connection = {
           subscribeMessage(callback, request) {
+            if (request.type !== "render_template") {
+              registrySubscriptions.push({ callback, request, closed: false })
+              const entry = registrySubscriptions.at(-1)
+              return Promise.resolve(() => {
+                entry.closed = true
+              })
+            }
             subscriptions.push({ callback, request })
             return Promise.resolve(() => {
               stops++
@@ -615,6 +623,83 @@
         assert(getComputedStyle(pending).display === "none", "an empty first result stays hidden")
         pending.remove()
         await tick()
+        const registryRequests = []
+        const registryConnection = {
+          subscribeMessage(callback, request) {
+            const entry = { callback, request, closed: false }
+            registryRequests.push(entry)
+            return Promise.resolve(() => {
+              entry.closed = true
+            })
+          },
+        }
+        const registryCards = [
+          document.createElement("auto-grid"),
+          document.createElement("auto-grid"),
+        ]
+        for (const card of registryCards) {
+          card.setConfig({ include: { label: "tablet" }, sort: [] })
+          card.hass = { connection: registryConnection, states: {} }
+          document.body.append(card)
+        }
+        await tick()
+        const registryQueries = () =>
+          registryRequests.filter(({ request }) => request.type === "render_template")
+        const registryStream = (kind) =>
+          registryRequests.find(({ request }) => request.event_type === `${kind}_registry_updated`)
+        assert(
+          registryQueries().length === 1 && registryRequests.length === 3,
+          "two identical grids share their template and registry subscriptions"
+        )
+        registryQueries()[0].callback({ result: [] })
+        await tick()
+        registryStream("entity").callback({ data: { action: "update", changes: { labels: [] } } })
+        registryStream("label").callback({ data: { action: "update" } })
+        registryStream("entity").callback({ data: { action: "update", changes: { labels: [] } } })
+        registryQueries()[0].callback({ result: [{ entity: "light.stale", group: 0 }] })
+        await tick()
+        assert(
+          registryCards.every((card) => getComputedStyle(card).display === "none"),
+          "registry invalidation rejects old results and keeps empty grids hidden"
+        )
+        await new Promise((resolve) => setTimeout(resolve, 120))
+        assert(registryQueries().length === 2, "a registry edit burst reopens one shared query")
+        registryQueries()[1].callback({ result: [{ entity: "light.labeled", group: 0 }] })
+        await tick()
+        const registryTiles = registryCards.map((card) =>
+          card.shadowRoot.querySelector("test-tile")
+        )
+        assert(
+          registryTiles.every((tile) => tile?.config.entity === "light.labeled"),
+          "initially empty label queries populate after registry edits"
+        )
+        registryStream("entity").callback({ data: { action: "update", changes: { name: null } } })
+        await tick()
+        assert(
+          registryCards.every(
+            (card, i) =>
+              card.shadowRoot.querySelector("test-tile") === registryTiles[i] &&
+              !card.shadowRoot.querySelector('[role="status"]')
+          ),
+          "populated grids retain cards without flashing loading placeholders during registry refresh"
+        )
+        await new Promise((resolve) => setTimeout(resolve, 120))
+        registryQueries()[2].callback({ result: [{ entity: "light.labeled", group: 0 }] })
+        await tick()
+        assert(
+          registryCards.every(
+            (card, i) => card.shadowRoot.querySelector("test-tile") === registryTiles[i]
+          ),
+          "unchanged refreshed results preserve card identity"
+        )
+        registryStream("label").callback({ data: { action: "remove" } })
+        registryCards.forEach((card) => card.remove())
+        await tick()
+        await new Promise((resolve) => setTimeout(resolve, 120))
+        assert(
+          registryQueries().length === 3 && registryRequests.every(({ closed }) => closed),
+          "disconnect cancels pending refreshes and releases all shared registry listeners"
+        )
         observer.disconnect()
         grid.remove()
         await tick()

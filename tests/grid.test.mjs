@@ -6,11 +6,16 @@ import { normalizeConfig } from "../src/query.ts"
 const tick = () => new Promise((resolve) => setImmediate(resolve))
 function fixture(create) {
   const subscriptions = [],
+    registrySubscriptions = [],
     created = []
   let stops = 0,
     updates = 0
   const connection = {
     subscribeMessage(callback, request) {
+      if (request.type !== "render_template") {
+        registrySubscriptions.push({ callback, request })
+        return Promise.resolve(() => {})
+      }
       subscriptions.push({ callback, request })
       return Promise.resolve(() => {
         stops++
@@ -41,6 +46,7 @@ function fixture(create) {
     grid,
     hass,
     subscriptions,
+    registrySubscriptions,
     created,
     emit,
     get stops() {

@@ -2,6 +2,10 @@ import type { Connection } from "./types.ts"
 
 const cache = new WeakMap<Connection, Promise<Record<string, string>>>()
 
+export function clearIntegrationNames(connection: Connection): void {
+  cache.delete(connection)
+}
+
 export function integrationNames(connection: Connection): Promise<Record<string, string>> {
   let names = cache.get(connection)
   if (!names) {
@@ -22,7 +26,7 @@ export function integrationNames(connection: Connection): Promise<Record<string,
         )
       })
       .catch((error: unknown) => {
-        cache.delete(connection)
+        if (cache.get(connection) === names) cache.delete(connection)
         console.debug("Auto Grid: integration names unavailable; using domains", error)
         return {}
       })

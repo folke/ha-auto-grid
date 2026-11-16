@@ -117,7 +117,10 @@ export interface QueryResult {
   sections?: QuerySection[]
 }
 
+export type RegistryKind = "entity" | "device" | "area" | "floor" | "label" | "integration"
+
 export interface CompiledQuery {
+  registries: RegistryKind[]
   template: string
   cards: CardConfig[]
   templates: CardTemplate[][]

@@ -9,6 +9,7 @@ import type {
   GroupConfig,
   GroupValue,
   QueryResult,
+  RegistryKind,
   Include,
   Pattern,
   QueryMatch,
@@ -225,17 +226,19 @@ function predicate(filter: Filter, sets: Map<string, string>): string {
 }
 
 // A restriction in an AND branch is a safe candidate set. Restrictions under OR/NOT aren't.
-function candidates(filter: Filter): string {
+function candidates(filter: Filter): { source: string; trackLifecycle: boolean } {
   for (const key of ["area", "label", "floor", "integration"] as const) {
-    if (filter[key] !== undefined) return membership(key, strings(filter[key], key))
+    if (filter[key] !== undefined)
+      return { source: membership(key, strings(filter[key], key)), trackLifecycle: true }
   }
   if (filter.entity_id !== undefined) {
     const ids = strings(filter.entity_id, "entity_id", true)
-    if (ids.every((id) => entityId.test(id))) return JSON.stringify(ids)
+    if (ids.every((id) => entityId.test(id)))
+      return { source: JSON.stringify(ids), trackLifecycle: true }
   }
   for (const child of filter.all ?? []) {
     const source = candidates(child)
-    if (source !== "states | map(attribute='entity_id') | list") return source
+    if (source.source !== "states | map(attribute='entity_id') | list") return source
   }
   const domains =
     filter.domain !== undefined
@@ -244,9 +247,12 @@ function candidates(filter: Filter): string {
         ? [...new Set(strings(filter.type, "type").map((type) => type.split("/")[0]))]
         : undefined
   if (domains) {
-    return `(${domains.map((d) => `(states.${d} | map(attribute='entity_id') | list)`).join(" + ")})`
+    return {
+      source: `(${domains.map((d) => `(states.${d} | map(attribute='entity_id') | list)`).join(" + ")})`,
+      trackLifecycle: false,
+    }
   }
-  return "states | map(attribute='entity_id') | list"
+  return { source: "states | map(attribute='entity_id') | list", trackLifecycle: false }
 }
 
 export function fieldValue(field: SortField, include: number): string {
@@ -341,9 +347,11 @@ function compileQuery(
     excludes.map((filter) => predicate(filter, sets)),
     "or"
   )
+  let needsLifecycle = false
   const groups = includes.map((filter, group) => {
     const condition = predicate(filter, sets)
-    const source = candidates(filter)
+    const { source, trackLifecycle } = candidates(filter)
+    needsLifecycle ||= trackLifecycle
     const values = sorts.map((sort, index) => {
       const value = fieldValue(sort.by, group)
       const prepared = numericSort(sort)
@@ -375,7 +383,9 @@ function compileQuery(
       "{% endfor %}",
     ].join("\n")
   })
-  const lines = [...sets].map(([expression, name]) => `{% set ${name} = ${expression} %}`)
+  // Counting states tracks additions/removals, not ordinary changes or a full-state iteration.
+  const lines = needsLifecycle ? ["{% set ag_lifecycle = states | count %}"] : []
+  lines.push(...[...sets].map(([expression, name]) => `{% set ${name} = ${expression} %}`))
   options.forEach(({ templates }, group) =>
     templates.forEach(({ source }, index) => {
       lines.push(
@@ -520,6 +530,44 @@ function groupKey(value: unknown, depth = 0): string {
     .join(",")}}`
 }
 
+const fieldRegistries: Partial<Record<SortField, RegistryKind[]>> = {
+  name: ["entity", "device"],
+  device: ["entity", "device"],
+  hidden: ["entity"],
+  area: ["entity", "device", "area"],
+  floor: ["entity", "device", "area", "floor"],
+  label: ["entity", "label"],
+  integration: ["entity", "integration"],
+}
+const allRegistries: RegistryKind[] = ["entity", "device", "area", "floor", "label", "integration"]
+
+function registryDependencies(
+  includes: Filter[],
+  excludes: Filter[],
+  sorts: NormalizedSort[],
+  group: GroupConfig | undefined,
+  plans: ReturnType<typeof compileCardOptions>[]
+): RegistryKind[] {
+  const result = new Set<RegistryKind>()
+  const field = (key: SortField) => fieldRegistries[key]?.forEach((kind) => result.add(kind))
+  const filter = (value: Filter) => {
+    for (const [key, child] of Object.entries(value)) {
+      if (key === "all" || key === "any" || key === "not") {
+        for (const nested of Array.isArray(child) ? child : [child]) filter(nested as Filter)
+      } else field(key as FilterField)
+    }
+  }
+  includes.forEach(filter)
+  excludes.forEach(filter)
+  sorts.forEach((sort) => field(sort.by))
+  if (group) field(group.by)
+  const custom =
+    (group && group.title !== "{{ group_name }}" && /{{|{%/.test(group.title)) ||
+    plans.some((plan) => plan.templates.some(({ source }) => /{{|{%/.test(source)))
+  if (custom) allRegistries.forEach((kind) => result.add(kind))
+  return allRegistries.filter((kind) => result.has(kind))
+}
+
 export function normalizeResult(value: unknown, config: GridConfig): QueryResult {
   if (!config.query.group) return { matches: normalizeMatches(value, config.query.cards.length) }
   if (!Array.isArray(value)) throw new Error("The grouped query must return a list of sections")
@@ -636,6 +684,7 @@ export function normalizeConfig(input: AutoGridConfig): GridConfig {
         groupNames,
         plans
       ),
+      registries: registryDependencies(includeFilters, excludes, normalizedSorts, group, plans),
       cards: plans.map((plan) => plan.card),
       templates: plans.map((plan) => plan.templates),
       group,

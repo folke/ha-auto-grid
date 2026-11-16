@@ -13,6 +13,8 @@ from jinja2.sandbox import ImmutableSandboxedEnvironment
 
 class States:
     def __init__(self, states):
+        self.reads = []
+        self.lifecycle_reads = 0
         self.values = {
             key: SimpleNamespace(
                 entity_id=key,
@@ -25,10 +27,15 @@ class States:
             for key, value in states.items()
         }
 
+    def __len__(self):
+        self.lifecycle_reads += 1
+        return len(self.values)
+
     def __iter__(self):
         return iter(self.values.values())
 
     def __call__(self, entity):
+        self.reads.append(entity)
         state = self.values.get(entity)
         return state.state if state else "unknown"
 
@@ -108,5 +115,5 @@ for case in payload:
             return case.get("memberships", {}).get(key, [])
         env.globals[kind + "_entities"] = entities
     result = env.from_string(case["template"]).render(**case.get("variables", {}))
-    output.append({"result": ast.literal_eval(result.strip()), "calls": calls})
+    output.append({"result": ast.literal_eval(result.strip()), "calls": calls, "state_reads": states.reads, "lifecycle_reads": states.lifecycle_reads})
 json.dump(output, sys.stdout)

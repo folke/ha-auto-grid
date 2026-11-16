@@ -332,9 +332,11 @@ group:
   title: "{{ group | join(', ') or 'Unlabelled' }}"
 ```
 
-Integration display names are fetched once per HA connection with `manifest/list`
-and cached. The names are passed as variables to the same template subscription.
-Lookup failures fall back to the raw domain and do not prevent the grid from loading.
+Integration display names are fetched with `manifest/list` and cached per HA
+connection. Config-entry changes, loaded integrations, or a reconnect snapshot invalidate that cache, so
+integration-group headings can refresh too. Names are passed as variables to the same
+template subscription. Lookup failures fall back to the raw domain and do not prevent
+the grid from loading.
 Custom templates can use `group` for the domain and `group_name` for the friendly name.
 
 Missing values form a group rather than dropping entities. An empty title omits its
@@ -655,6 +657,45 @@ be customized with the `--auto-grid-gap` CSS property; otherwise it uses HA's
   placeholders remain available with `show_empty: true` or in HA's editor preview.
 - Query errors and helper failures are shown in the card, with a Retry button.
 
+### Registry changes
+
+HA's template registry helpers read fresh metadata but do not themselves subscribe to
+registry edits. Auto Grid shares event subscriptions per HA connection for the entity,
+device, area, floor, and label registries, plus the native `config_entries/subscribe`
+stream and `component_loaded` events for integrations. They are opened only while an active query needs them.
+
+The compiler collects dependency kinds from include/exclude rules (including nested
+rules), sorting, and grouping. For example, area queries depend on entity/device/area
+registries, floor queries additionally depend on floors, and label queries depend on
+entity/label registries. The default name sort depends on entity/device registries.
+Pure state/type queries with `sort: []` need no registry listeners.
+
+Custom Jinja heading templates and Jinja-valued `$` options conservatively depend on
+all registry kinds, because they can call arbitrary metadata helpers. Ordinary
+Mushroom templates passed through to child cards do not add Auto Grid dependencies.
+
+Relevant edits invalidate each shared query, coalescing bursts with a 100 ms trailing
+debounce before reopening its template subscription. Old replies are ignored. Existing
+cards remain visible and are reconciled with fresh results; no loading flash or
+per-`hass` query work is introduced. Initially empty areas/labels can populate after
+membership changes. Dependency matching is by registry kind, not individual entity
+or label ID, so an unrelated edit in a relevant registry can still refresh the query.
+
+Registry and explicit-ID candidate queries also use `states | count` once to establish
+HA's lifecycle-only dependency. This tracks entity additions/removals without
+iterating all states or re-rendering for ordinary state updates. The count is not
+part of the returned result. Domain/all-state iteration already tracks lifecycle and
+does not need the extra hook. This covers entity creation/removal races, including
+YAML integrations without registry entries, while preserving scoped selection.
+
+Config-entry initial snapshots are ignored; subsequent edits, reconnect snapshots,
+and integration load events refresh integration-dependent queries and cached manifest
+names. Reactivating after an unwatched interval also obtains fresh manifest names. The last active
+consumer closes registry listeners and cancels queued refreshes. Native event streams
+are allowed for non-admin users on supported HA versions. There is no frontend
+registry mirror, polling, or injected `now()` timer. If a registry subscription is
+rejected, it is logged to the browser console; normal state tracking continues.
+
 ### Backend trade-offs
 
 The compiler narrows candidates to an area/label/floor/integration, explicit IDs, or domains/types
@@ -666,10 +707,9 @@ all entities of a domain (typically once per second). A scoped candidate list av
 those broad iteration patterns, though it still reads the states needed for filtering
 and sorting. Backend work is reduced in scope, not eliminated.
 
-Registry-only changes (renaming/reassigning areas, labels, devices) depend on HA's
-tracking of the template helpers involved. This version does not separately subscribe
-to registry events; if membership appears stale after such an edit, reload the card/view.
-It is not a guarantee of immediate metadata invalidation.
+Registry-driven refreshes are event-based and coalesced rather than synchronous with
+the edit. Ordinary state-driven updates remain governed by HA's template dependency
+tracking and rate limits.
 
 ## Development
 
