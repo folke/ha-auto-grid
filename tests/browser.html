@@ -64,6 +64,41 @@
         document.body.append(grid)
         await tick()
         assert(subscriptions.length === 1, "subscribed when mounted")
+        assert(
+          getComputedStyle(grid).display === "none" &&
+            !grid.shadowRoot.querySelector('[role="status"]') &&
+            (await grid.getCardSize()) === 0,
+          "show_empty false suppresses initial loading content and reserved height"
+        )
+        assert(!grid.hidden, "loading grids stay connected and subscribed")
+        grid.preview = true
+        await tick()
+        assert(
+          getComputedStyle(grid).display !== "none" &&
+            grid.shadowRoot
+              .querySelector('[role="status"]')
+              .textContent.includes("Loading entities"),
+          "preview retains a loading placeholder"
+        )
+        grid.preview = false
+        grid.setConfig({ ...config, show_empty: true, title: "Pending" })
+        await tick()
+        assert(
+          grid.shadowRoot
+            .querySelector('[role="status"]')
+            .textContent.includes("Loading entities") &&
+            grid.shadowRoot.querySelector(".card-header").textContent === "Pending" &&
+            (await grid.getCardSize()) === 2,
+          "show_empty true retains loading content, title, and sizing"
+        )
+        grid.setConfig(config)
+        await tick()
+        assert(
+          getComputedStyle(grid).display === "none" &&
+            !grid.shadowRoot.querySelector(".card-header") &&
+            subscriptions.length === 1,
+          "returning to show_empty false hides all placeholders without reopening the query"
+        )
         emit(0, ["light.a", "light.b"])
         await tick()
         await grid.updateComplete
@@ -165,6 +200,12 @@
         assert(stops === 1, "unsubscribes on removal")
         document.body.append(grid)
         await tick()
+        assert(
+          getComputedStyle(grid).display !== "none" &&
+            tiles()[0] === b &&
+            !grid.shadowRoot.querySelector('[role="status"]'),
+          "cached cards stay visible while a refreshed result is pending"
+        )
         emit(1, ["light.b", "light.a", "light.c"])
         await tick()
         assert(tiles()[0] === b && created === 3, "remount reuses existing cards")
@@ -488,6 +529,13 @@
         await tick()
         const nested = parent.shadowRoot.querySelector("auto-grid")
         assert(
+          nested &&
+            getComputedStyle(nested).display === "none" &&
+            !nested.shadowRoot.querySelector('[role="status"]') &&
+            (await nested.getCardSize()) === 0,
+          "nested cards do not flash loading content before their first result"
+        )
+        assert(
           nested && subscriptions.length === parentIndex + 2,
           "a real nested Auto Grid subscribes using its rendered entity lists"
         )
@@ -539,6 +587,34 @@
           stops === stopsBeforeParentRemoval + 2,
           "nested subscriptions both close when the parent disconnects"
         )
+        const pending = document.createElement("auto-grid")
+        const pendingIndex = subscriptions.length
+        pending.setConfig({ include: { entity_id: "light.pending" } })
+        pending.hass = hass
+        document.body.append(pending)
+        await tick()
+        subscriptions[pendingIndex].callback({ error: { message: "pending query failed" } })
+        await tick()
+        assert(
+          getComputedStyle(pending).display !== "none" &&
+            pending.shadowRoot
+              .querySelector('[role="alert"]')
+              .textContent.includes("pending query failed") &&
+            (await pending.getCardSize()) === 1,
+          "errors stay visible even before any matching cards arrive"
+        )
+        pending.shadowRoot.querySelector("button").click()
+        await tick()
+        assert(
+          getComputedStyle(pending).display === "none" &&
+            !pending.shadowRoot.querySelector('[role="status"]'),
+          "retry hides the initial loading placeholder again"
+        )
+        subscriptions[pendingIndex + 1].callback({ result: [] })
+        await tick()
+        assert(getComputedStyle(pending).display === "none", "an empty first result stays hidden")
+        pending.remove()
+        await tick()
         observer.disconnect()
         grid.remove()
         await tick()

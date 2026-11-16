@@ -80,13 +80,18 @@ export class AutoGrid extends LitElement {
     super.disconnectedCallback()
   }
 
-  private gridChanged(): void {
-    const empty = !this.grid.loading && !this.grid.error && !this.grid.cards.length
-    // Don't set `hidden`: HA removes hidden cards from the DOM, preventing query recovery.
-    this.toggleAttribute(
-      "empty",
-      empty && this.config?.show_empty === false && !this.currentPreview
+  private get hideEmpty(): boolean {
+    return (
+      this.config?.show_empty === false &&
+      !this.currentPreview &&
+      !this.grid.error &&
+      !this.grid.cards.length
     )
+  }
+
+  private gridChanged(): void {
+    // Don't set `hidden`: HA removes hidden cards from the DOM, preventing query recovery.
+    this.toggleAttribute("empty", this.hideEmpty)
     this.requestUpdate()
     void this.updateComplete.then(() => {
       if (!this.isConnected) return
@@ -117,14 +122,7 @@ export class AutoGrid extends LitElement {
       for (let i = 0; i < heights.length; i += columns)
         size += Math.max(...heights.slice(i, i + columns))
     }
-    const contentSize =
-      size ||
-      (this.config?.show_empty === false &&
-      !this.grid.loading &&
-      !this.grid.error &&
-      !this.currentPreview
-        ? 0
-        : 1)
+    const contentSize = size || (this.hideEmpty ? 0 : 1)
     return contentSize + (contentSize && this.config?.title ? 1 : 0)
   }
 
@@ -133,14 +131,7 @@ export class AutoGrid extends LitElement {
   }
 
   protected render() {
-    if (
-      !this.grid.error &&
-      !this.grid.loading &&
-      !this.grid.cards.length &&
-      this.config?.show_empty === false &&
-      !this.currentPreview
-    )
-      return nothing
+    if (this.hideEmpty) return nothing
     return html`${
       this.config?.title ? html`<h1 class="card-header">${this.config.title}</h1>` : nothing
     }${this.renderContent()}`
@@ -189,7 +180,8 @@ export class AutoGrid extends LitElement {
       display: block;
     }
     :host([empty]) {
-      display: none;
+      /* Parent grids can force display:block on children across the shadow boundary. */
+      display: none !important;
     }
     .card-header {
       color: var(--ha-card-header-color, var(--primary-text-color));

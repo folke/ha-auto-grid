@@ -590,7 +590,7 @@ model rather than the legacy/composed `friendly_name` attribute. It does not eva
 | `title`      | —                | Optional text heading above the grid                                      |
 | `columns`    | `2`              | Positive integer for fixed columns, or `auto` for a single horizontal row |
 | `square`     | `false`          | Square cells, like the native grid card                                   |
-| `show_empty` | `false`          | Show an empty-state message instead of hiding the grid                    |
+| `show_empty` | `false`          | Show loading/empty placeholders instead of hiding the grid                |
 | `group`      | `false`          | Boolean, field name, or `{ by, title }` for visual grouping               |
 | `sort`       | `name`           | Sort string/object or mixed priority-ordered list; `[]` disables sorting  |
 | `limit`      | —                | Maximum number of results, applied last                                   |
@@ -644,8 +644,10 @@ be customized with the `--auto-grid-gap` CSS property; otherwise it uses HA's
   subscription. Wrappers that only apply CSS hiding may keep it connected and
   subscribed. There is no general active-view visibility observer yet.
 - Below-the-fold cards and background browser tabs remain subscribed while connected.
-- An empty grid remains subscribed so it can populate again. It remains visible in
-  HA's editor preview even with `show_empty: false`.
+- With `show_empty: false`, initial loading and empty results render no placeholder,
+  title, or reserved height. Cached cards remain visible while refreshing. An empty
+  grid stays connected and subscribed so it can populate again. Loading/empty
+  placeholders remain available with `show_empty: true` or in HA's editor preview.
 - Query errors and helper failures are shown in the card, with a Retry button.
 
 ### Backend trade-offs
