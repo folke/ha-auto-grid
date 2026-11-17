@@ -1,4 +1,5 @@
-import { testConnection, type Message } from "./helpers.ts"
+import { testConnection } from "./helpers.ts"
+import type { Message } from "./helpers.ts"
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import { integrationNames } from "../src/integrations.ts"

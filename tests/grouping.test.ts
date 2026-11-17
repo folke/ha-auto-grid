@@ -53,7 +53,7 @@ test("grouped results validate types and retain number/string/boolean identities
   const config = normalizeConfig({ include: {}, group: true })
   const sections = [0, "0", false, null, ["a"], { a: 1 }].map((value, i) => ({
     value,
-    title: String(value),
+    title: JSON.stringify(value),
     matches: [{ entity: `light.item_${i}`, group: 0 }],
   }))
   const result = normalizeResult(sections, config)
@@ -87,7 +87,7 @@ test(
     } = {
       states: {
         "light.a": { state: "on", name: "A", attributes: { bucket: 1 } },
-        "sensor.b": { state: "on", name: "B", attributes: { bucket: 1.0 } },
+        "sensor.b": { state: "on", name: "B", attributes: { bucket: 1 } },
         "light.c": { state: "off", name: "C", attributes: { bucket: true } },
         "sensor.d": { state: "off", name: "D", attributes: { bucket: "1" } },
         "sensor.e": { state: "on", name: "E" },
@@ -285,7 +285,7 @@ test(
     ]
     const output = spawnSync(
       "python3",
-      [fileURLToPath(new URL("./render-template.py", import.meta.url))],
+      [fileURLToPath(new URL("render-template.py", import.meta.url))],
       {
         input: JSON.stringify(
           cases.map(([config]) => ({

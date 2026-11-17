@@ -27,7 +27,7 @@ export function integrationNames(connection: Connection): Promise<Record<string,
       })
       .catch((error: unknown) => {
         if (cache.get(connection) === names) cache.delete(connection)
-        console.debug("Auto Grid: integration names unavailable; using domains", error)
+        console.warn("Auto Grid: integration names unavailable; using domains", error)
         return {}
       })
     cache.set(connection, names)

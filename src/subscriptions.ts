@@ -34,7 +34,7 @@ function dispose(unsubscribe?: Dispose): void {
   if (unsubscribe)
     void Promise.resolve()
       .then(unsubscribe)
-      .catch((error: unknown) => console.debug("Auto Grid: unsubscribe failed", error))
+      .catch((error: unknown) => console.warn("Auto Grid: unsubscribe failed", error))
 }
 
 function stop(entry: Entry): void {
@@ -50,7 +50,7 @@ export function subscribeTemplate(
   variables?: Record<string, unknown>,
   options: Options = {}
 ): () => void {
-  const kinds = [...new Set(options.registries ?? [])].sort()
+  const kinds = [...new Set(options.registries)].sort()
   const key = JSON.stringify([template, variables ?? {}, kinds, options.integrationNames ?? false])
   let entries = connections.get(connection)
   if (!entries) {
@@ -60,11 +60,11 @@ export function subscribeTemplate(
   let entry = entries.get(key)
   if (!entry) {
     entry = {
-      consumers: new Set([consumer]),
-      hasValue: false,
       closed: false,
-      stale: false,
+      consumers: new Set([consumer]),
       generation: 0,
+      hasValue: false,
+      stale: false,
     }
     entries.set(key, entry)
     const current = entry
@@ -93,7 +93,7 @@ export function subscribeTemplate(
                 current.error = undefined
                 current.consumers.forEach((c) => c.result(message.result))
               },
-              { type: "render_template", template, ...(context ? { variables: context } : {}) }
+              { template, type: "render_template", ...(context ? { variables: context } : {}) }
             )
             .then((unsubscribe) => {
               if (!valid()) dispose(unsubscribe)
@@ -118,6 +118,8 @@ export function subscribeTemplate(
       current.generation++
       stop(current)
       if (first) current.consumers.forEach((c) => c.refresh?.())
+      // A refresh consumer can synchronously release the last subscription.
+      // oxlint-disable-next-line typescript/no-unnecessary-condition
       if (current.closed) return
       clearTimeout(current.timer)
       current.timer = setTimeout(() => {

@@ -1,17 +1,10 @@
 import type { CardConfig, Connection } from "../src/types.ts"
 import type { GridSection } from "../src/grid.ts"
-import {
-  testCard,
-  testConnection,
-  type Callback,
-  type Message,
-  type Request,
-  type TestCard,
-} from "./helpers.ts"
+import { testCard, testConnection, normalizeConfig } from "./helpers.ts"
+import type { Callback, Message, Request, TestCard } from "./helpers.ts"
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import { GridController } from "../src/grid.ts"
-import { normalizeConfig } from "./helpers.ts"
 
 const tick = () => new Promise((resolve) => setImmediate(resolve))
 type TestEntry = Omit<GridController["cards"][number], "card"> & { card: TestCard }

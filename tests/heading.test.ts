@@ -100,8 +100,14 @@ test("heading editor preserves native options, migrates title only on edits, and
   assert.equal(enabled, base)
   assert.deepEqual(updateLayout(edited, { columns: "auto" }).heading, edited.heading)
   assert.deepEqual(updateSelection(edited, selectionData(edited)).heading, edited.heading)
-  for (const value of [null, [], "Heading", { entity: "light.fixed" }, { $heading: "{{ group }}" }])
-    assert.throws(() => updateHeading(config, value))
+  for (const invalid of [
+    null,
+    [],
+    "Heading",
+    { entity: "light.fixed" },
+    { $heading: "{{ group }}" },
+  ])
+    assert.throws(() => updateHeading(config, invalid))
 })
 
 test("empty native heading initialization is a no-op; clearing text preserves icons and badges", () => {

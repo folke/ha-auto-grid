@@ -139,7 +139,7 @@ test(
     })
     const output = spawnSync(
       "python3",
-      [fileURLToPath(new URL("./render-template.py", import.meta.url))],
+      [fileURLToPath(new URL("render-template.py", import.meta.url))],
       { input: JSON.stringify(payload), encoding: "utf8" }
     )
     assert.equal(output.status, 0, output.stderr)

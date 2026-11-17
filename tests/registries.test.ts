@@ -1,17 +1,10 @@
-import {
-  testConnection,
-  testCard,
-  type Callback,
-  type Request,
-  type Message,
-  type Dispose,
-} from "./helpers.ts"
+import { testConnection, testCard, normalizeConfig, rendered } from "./helpers.ts"
+import type { Callback, Request, Message, Dispose } from "./helpers.ts"
 import type { RegistryKind } from "../src/types.ts"
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import { spawnSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
-import { normalizeConfig, rendered } from "./helpers.ts"
 import { subscribeTemplate } from "../src/subscriptions.ts"
 import { watchRegistries } from "../src/registries.ts"
 import { GridController } from "../src/grid.ts"
@@ -191,7 +184,7 @@ test("pending setup is disposed even if invalidated or disconnected before its u
   t.mock.timers.enable({ apis: ["setTimeout"] })
   const f = fixture(),
     pending: { callback: Callback; resolve: (dispose: Dispose) => void }[] = []
-  const original = f.connection.subscribeMessage
+  const original = f.connection.subscribeMessage.bind(f.connection)
   f.connection.subscribeMessage = (callback, request) => {
     if (request.type !== "render_template") return original(callback, request)
     return new Promise<Dispose>((resolve) =>
@@ -314,7 +307,7 @@ test(
     const config = normalizeConfig({ include: { label: "office", hidden: false } })
     const output = spawnSync(
       "python3",
-      [fileURLToPath(new URL("./render-template.py", import.meta.url))],
+      [fileURLToPath(new URL("render-template.py", import.meta.url))],
       {
         input: JSON.stringify([
           {

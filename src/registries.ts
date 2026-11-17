@@ -12,7 +12,7 @@ const connections = new WeakMap<Connection, Map<RegistryKind, Stream>>()
 function dispose(unsubscribe: Dispose): void {
   void Promise.resolve()
     .then(unsubscribe)
-    .catch((error: unknown) => console.debug("Auto Grid: registry unsubscribe failed", error))
+    .catch((error: unknown) => console.warn("Auto Grid: registry unsubscribe failed", error))
 }
 
 function stop(stream: Stream): void {
@@ -33,7 +33,7 @@ export function watchRegistries(
   const releases = [...new Set(kinds)].map((kind) => {
     let stream = streams!.get(kind)
     if (!stream) {
-      stream = { consumers: new Set(), closed: false, unsubscribes: new Set() }
+      stream = { closed: false, consumers: new Set(), unsubscribes: new Set() }
       streams!.set(kind, stream)
       const current = stream
       current.consumers.add(changed)
@@ -70,8 +70,8 @@ export function watchRegistries(
           if (!snapshot || snapshotSeen) notify()
           if (snapshot) snapshotSeen = true
         })
-        subscribe({ type: "subscribe_events", event_type: "component_loaded" }, notify)
-      } else subscribe({ type: "subscribe_events", event_type: `${kind}_registry_updated` }, notify)
+        subscribe({ event_type: "component_loaded", type: "subscribe_events" }, notify)
+      } else subscribe({ event_type: `${kind}_registry_updated`, type: "subscribe_events" }, notify)
     } else stream.consumers.add(changed)
     const current = stream
     return () => {

@@ -42,7 +42,7 @@ export function updateCard(config: AutoGridConfig, value: unknown, visual = fals
 }
 
 export function headingEditorValue(config: AutoGridConfig): CardConfig {
-  return headingConfig(config) ?? { type: "heading", heading_style: "title", heading: "" }
+  return headingConfig(config) ?? { heading: "", heading_style: "title", type: "heading" }
 }
 
 export function updateHeading(config: AutoGridConfig, value: unknown): AutoGridConfig {
@@ -58,7 +58,7 @@ export function updateHeading(config: AutoGridConfig, value: unknown): AutoGridC
     const current = headingEditorValue(config)
     const comparable = { ...normalized, heading: normalized?.heading ?? "" }
     if (sameConfig(comparable, { ...current, heading: current.heading ?? "" })) return config
-    if (sameConfig(comparable, { type: "heading", heading_style: "title", heading: "" })) {
+    if (sameConfig(comparable, { heading: "", heading_style: "title", type: "heading" })) {
       delete result.heading
     } else {
       delete card.type
@@ -98,8 +98,8 @@ export function updateSelection(config: AutoGridConfig, value: unknown): AutoGri
 export function layoutData(config: AutoGridConfig): Record<string, unknown> {
   return {
     columns: String(config.columns ?? 2),
-    square: config.square ?? false,
     show_empty: config.show_empty ?? false,
+    square: config.square ?? false,
   }
 }
 

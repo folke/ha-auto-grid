@@ -6,12 +6,9 @@ import { readFile } from "node:fs/promises"
 const root = new URL("../", import.meta.url)
 const page = process.argv[2] === "editor" ? "editor" : "browser"
 const server = createServer(async (request, response) => {
-  const path =
-    request.url === `/tests/${page}.html`
-      ? `tests/${page}.html`
-      : request.url === "/dist/auto-grid.js"
-        ? "dist/auto-grid.js"
-        : undefined
+  let path
+  if (request.url === `/tests/${page}.html`) path = `tests/${page}.html`
+  else if (request.url === "/dist/auto-grid.js") path = "dist/auto-grid.js"
   if (!path) {
     response.writeHead(404).end()
     return
@@ -41,7 +38,7 @@ try {
     const timer = setTimeout(() => {
       browser.kill("SIGKILL")
       reject(new Error("Browser test timed out"))
-    }, 30000)
+    }, 30_000)
     browser.stdout.on("data", (data) => {
       stdout += data
     })

@@ -1,4 +1,4 @@
-import type { GridConfig, QueryMatch } from "../src/types.ts"
+import type { GridConfig, QueryMatch, QuerySection } from "../src/types.ts"
 import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
@@ -185,7 +185,7 @@ test(
     ]
     const output = spawnSync(
       "python3",
-      [fileURLToPath(new URL("./render-template.py", import.meta.url))],
+      [fileURLToPath(new URL("render-template.py", import.meta.url))],
       {
         input: JSON.stringify(
           configs.map((config) => ({ states, template: config.query.template }))
@@ -194,9 +194,9 @@ test(
       }
     )
     assert.equal(output.status, 0, output.stderr)
-    const results = rendered<QueryMatch[] | import("../src/types.ts").QuerySection[]>(
-      output.stdout
-    ).map((result, i) => normalizeResult(result.result, configs[i]))
+    const results = rendered<QueryMatch[] | QuerySection[]>(output.stdout).map((result, i) =>
+      normalizeResult(result.result, configs[i])
+    )
     assert.deepEqual(
       results[0].matches.map(
         (row) => (render(configs[0], row).tap_action as Record<string, unknown>).url_path

@@ -41,7 +41,7 @@ export class GridController {
   configure(config: GridConfig): void {
     const queryChanged =
       this.config?.query.template !== config.query.template ||
-      JSON.stringify(this.config?.query.registries) !== JSON.stringify(config.query.registries)
+      JSON.stringify(this.config.query.registries) !== JSON.stringify(config.query.registries)
     const cardsChanged =
       JSON.stringify([this.config?.query.cards, this.config?.query.templates]) !==
       JSON.stringify([config.query.cards, config.query.templates])
@@ -98,9 +98,6 @@ export class GridController {
       connection,
       query.template,
       {
-        result: (value) => {
-          if (this.active && this.subscriptionToken === token) void this.select(value)
-        },
         error: (error) => {
           if (this.active && this.subscriptionToken === token) this.fail(error)
         },
@@ -111,9 +108,12 @@ export class GridController {
           this.error = undefined
           this.changed()
         },
+        result: (value) => {
+          if (this.active && this.subscriptionToken === token) void this.select(value)
+        },
       },
       undefined,
-      { registries: query.registries, integrationNames: query.group?.by === "integration" }
+      { integrationNames: query.group?.by === "integration", registries: query.registries }
     )
   }
 
@@ -164,7 +164,7 @@ export class GridController {
             existing && (existing.configKey === configKey || update)
               ? existing.card
               : await this.create(structuredClone(config))
-          return { entity, group, card, configKey, cardType: config.type, update, config }
+          return { card, cardType: config.type, config, configKey, entity, group, update }
         })
       )
       if (!this.active || revision !== this.revision) return
@@ -173,11 +173,11 @@ export class GridController {
         card.hass = this.hass!
       }
       this.cards = cards.map(({ entity, group, card, configKey, cardType }) => ({
+        card,
+        cardType,
+        configKey,
         entity,
         group,
-        card,
-        configKey,
-        cardType,
       }))
       this.cache = new Map(this.cards.map((entry) => [entry.entity, entry]))
       this.setSections(result, signature)
@@ -192,10 +192,10 @@ export class GridController {
   private setSections(result: QueryResult, signature: string | undefined): void {
     this.sectionSignature = signature
     this.sections = result.sections?.map((section) => ({
-      key: section.key,
-      value: section.value,
-      title: section.title,
       cards: section.matches.map(({ entity }) => this.cache.get(entity)!),
+      key: section.key,
+      title: section.title,
+      value: section.value,
     }))
   }
 

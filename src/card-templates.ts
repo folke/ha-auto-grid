@@ -40,9 +40,9 @@ export function mergeCardOptions(
   for (const [key, value] of Object.entries(override)) {
     delete result[key.startsWith("$") ? key.slice(1) : `$${key}`]
     Object.defineProperty(result, key, {
-      value,
-      enumerable: true,
       configurable: true,
+      enumerable: true,
+      value,
       writable: true,
     })
   }
@@ -85,7 +85,7 @@ export function renderCardOptions(
 ): CardConfig {
   if (
     (values?.length ?? 0) !== templates.length ||
-    (values && values.some((value) => typeof value !== "string"))
+    values?.some((value) => typeof value !== "string")
   ) {
     throw new Error("Invalid rendered card template values")
   }
@@ -94,9 +94,9 @@ export function renderCardOptions(
     let target: unknown = result
     for (const key of path.slice(0, -1)) target = (target as Record<string | number, unknown>)[key]
     Object.defineProperty(target, path.at(-1)!, {
-      value: values![index],
-      enumerable: true,
       configurable: true,
+      enumerable: true,
+      value: values![index],
       writable: true,
     })
   })

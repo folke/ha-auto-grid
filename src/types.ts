@@ -4,8 +4,8 @@ export interface LovelaceCard extends HTMLElement {
   hass: HomeAssistant
   preview?: boolean
   layout?: string
-  getCardSize?(): number | Promise<number>
-  setConfig?(config: CardConfig): void
+  getCardSize?: () => number | Promise<number>
+  setConfig?: (config: CardConfig) => void
 }
 
 export interface TemplateResult {
@@ -14,11 +14,13 @@ export interface TemplateResult {
 }
 
 export interface Connection {
-  sendMessagePromise?<T>(message: Record<string, unknown>): Promise<T>
-  subscribeMessage<T>(
+  sendMessagePromise?: <T>(message: Record<string, unknown>) => Promise<T>
+  // Callers choose the WebSocket event payload type.
+  // oxlint-disable-next-line typescript/no-unnecessary-type-parameters
+  subscribeMessage: <T>(
     callback: (message: T) => void,
     message: Record<string, unknown>
-  ): Promise<() => void | Promise<void>>
+  ) => Promise<() => void | Promise<void>>
 }
 
 export interface HomeAssistant {
@@ -145,7 +147,7 @@ export interface GridConfig {
 }
 
 export interface CardHelpers {
-  createCardElement(config: CardConfig): LovelaceCard | Promise<LovelaceCard>
+  createCardElement: (config: CardConfig) => LovelaceCard | Promise<LovelaceCard>
 }
 
 declare global {

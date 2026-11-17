@@ -1,4 +1,5 @@
-import { testConnection, type Callback, type Dispose, type Message } from "./helpers.ts"
+import { testConnection } from "./helpers.ts"
+import type { Callback, Dispose, Message } from "./helpers.ts"
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import { subscribeTemplate } from "../src/subscriptions.ts"

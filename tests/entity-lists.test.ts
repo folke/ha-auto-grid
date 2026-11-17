@@ -44,7 +44,7 @@ const python = spawnSync("python3", ["-c", "import jinja2"], { encoding: "utf8" 
 const execute = (cases: unknown[]) => {
   const output = spawnSync(
     "python3",
-    [fileURLToPath(new URL("./render-template.py", import.meta.url))],
+    [fileURLToPath(new URL("render-template.py", import.meta.url))],
     {
       input: JSON.stringify(cases),
       encoding: "utf8",

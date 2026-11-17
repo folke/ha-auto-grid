@@ -95,8 +95,8 @@ test(
         ["sensor.b", "sensor.d"],
       ],
       [{ include: { last_changed: ">= 1767226800" } }, ["sensor.a", "sensor.c"]],
-      [{ include: { last_changed: 1767225600 } }, ["sensor.d"]],
-      [{ include: { last_changed: [1767225600, 1767226200] } }, ["sensor.b", "sensor.d"]],
+      [{ include: { last_changed: 1_767_225_600 } }, ["sensor.d"]],
+      [{ include: { last_changed: [1_767_225_600, 1_767_226_200] } }, ["sensor.b", "sensor.d"]],
       [{ include: { last_updated: "<1767228300" } }, ["sensor.a", "sensor.c"]],
       [{ include: selection, exclude: { last_updated: ">1767228300" } }, ["sensor.a", "sensor.c"]],
       [
@@ -136,7 +136,7 @@ test(
     ]
     const output = spawnSync(
       "python3",
-      [fileURLToPath(new URL("./render-template.py", import.meta.url))],
+      [fileURLToPath(new URL("render-template.py", import.meta.url))],
       {
         input: JSON.stringify(
           cases.map(([config]) => ({

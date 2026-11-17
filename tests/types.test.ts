@@ -157,7 +157,7 @@ test(
     const configs = [...cases, ...grouped]
     const output = spawnSync(
       "python3",
-      [fileURLToPath(new URL("./render-template.py", import.meta.url))],
+      [fileURLToPath(new URL("render-template.py", import.meta.url))],
       {
         input: JSON.stringify(
           configs.map(([config]) => ({ states, template: normalizeConfig(config).query.template }))
@@ -241,7 +241,7 @@ test(
     ]
     const output = spawnSync(
       "python3",
-      [fileURLToPath(new URL("./render-template.py", import.meta.url))],
+      [fileURLToPath(new URL("render-template.py", import.meta.url))],
       {
         input: JSON.stringify(
           cases.map(([group]) => ({

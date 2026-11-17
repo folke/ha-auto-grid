@@ -34,7 +34,7 @@ test(
     ]
     const output = spawnSync(
       "python3",
-      [fileURLToPath(new URL("./render-template.py", import.meta.url))],
+      [fileURLToPath(new URL("render-template.py", import.meta.url))],
       {
         input: JSON.stringify(
           cases.map(([config]) => ({ states, template: normalizeConfig(config).query.template }))

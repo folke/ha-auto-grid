@@ -39,7 +39,8 @@ export class AutoGrid extends LitElement {
   private headings = new Map<string, HeadingEntry>()
   private grid = new GridController(
     async (config) => {
-      const card = await (await loadHelpers()).createCardElement(config)
+      const cardHelpers = await loadHelpers()
+      const card = await cardHelpers.createCardElement(config)
       card.preview = this.currentPreview
       card.layout = this.currentLayout
       return card
@@ -53,7 +54,7 @@ export class AutoGrid extends LitElement {
   }
 
   static getStubConfig(): AutoGridConfig {
-    return { columns: 2, include: { type: "light" }, card: { type: "tile" } }
+    return { card: { type: "tile" }, columns: 2, include: { type: "light" } }
   }
 
   setConfig(config: AutoGridConfig): void {
@@ -138,9 +139,9 @@ export class AutoGrid extends LitElement {
       known.add(key)
       if (sections.length > 1 && section.title)
         desired.set(key, {
-          type: "heading",
-          heading_style: "subtitle",
           heading: section.title,
+          heading_style: "subtitle",
+          type: "heading",
         })
     }
     for (const key of this.headings.keys()) if (!known.has(key)) this.headings.delete(key)
@@ -155,14 +156,14 @@ export class AutoGrid extends LitElement {
           previous.card.setConfig(structuredClone(config))
           previous.error = undefined
         } catch (error) {
-          previous.error = String((error as Error).message ?? error)
+          previous.error = String((error as Partial<Error> | null | undefined)?.message ?? error)
         }
         continue
       }
       const entry: HeadingEntry = { signature }
       this.headings.set(key, entry)
       void loadHelpers()
-        .then((helpers) => helpers.createCardElement(structuredClone(config)))
+        .then((cardHelpers) => cardHelpers.createCardElement(structuredClone(config)))
         .then((card) => {
           if (this.headings.get(key) !== entry) return
           entry.card = card
@@ -173,7 +174,7 @@ export class AutoGrid extends LitElement {
         })
         .catch((error: unknown) => {
           if (this.headings.get(key) !== entry) return
-          entry.error = String((error as Error).message ?? error)
+          entry.error = String((error as Partial<Error> | null | undefined)?.message ?? error)
           this.gridChanged()
         })
     }
@@ -188,6 +189,8 @@ export class AutoGrid extends LitElement {
     void this.updateComplete.then(async () => {
       if (!this.isConnected || update !== this.sizeUpdate) return
       const size = await this.getCardSize()
+      // The card may disconnect while its children's sizes are pending.
+      // oxlint-disable-next-line typescript/no-unnecessary-condition
       if (!this.isConnected || update !== this.sizeUpdate) return
       this.dispatchEvent(new CustomEvent("card-size-changed", { bubbles: true, composed: true }))
       if (size !== this.reportedSize) {
@@ -201,7 +204,7 @@ export class AutoGrid extends LitElement {
   async getCardSize(): Promise<number> {
     const configuredColumns = this.config?.columns ?? 2
     const cards = this.grid.cards
-    const sections = this.grid.sections ?? [{ title: "", cards }]
+    const sections = this.grid.sections ?? [{ cards, title: "" }]
     const sizes = await Promise.all(
       cards.map(async ({ card }) => {
         try {
@@ -226,7 +229,7 @@ export class AutoGrid extends LitElement {
   }
 
   getGridOptions(): { columns: number; rows: string; min_columns: number } {
-    return { columns: 12, rows: "auto", min_columns: 3 }
+    return { columns: 12, min_columns: 3, rows: "auto" }
   }
 
   protected render() {
@@ -265,7 +268,7 @@ export class AutoGrid extends LitElement {
         </div></ha-card
       >`
     }
-    const sections = this.grid.sections ?? [{ key: "ungrouped", title: "", cards: this.grid.cards }]
+    const sections = this.grid.sections ?? [{ cards: this.grid.cards, key: "ungrouped", title: "" }]
     return html`${repeat(
       sections,
       ({ key }) => key,

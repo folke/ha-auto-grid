@@ -73,11 +73,8 @@ function literal(value: Pattern): string {
 }
 
 function join(expressions: string[], operator: "and" | "or"): string {
-  return expressions.length
-    ? `(${expressions.join(` ${operator} `)})`
-    : operator === "and"
-      ? "true"
-      : "false"
+  if (expressions.length) return `(${expressions.join(` ${operator} `)})`
+  return operator === "and" ? "true" : "false"
 }
 
 function matchOne(target: string, value: Pattern): string {
@@ -106,7 +103,7 @@ function matchOne(target: string, value: Pattern): string {
   } else if (value.includes("*")) {
     pattern = `^${value
       .split("*")
-      .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`))
       .join(".*")}$`
   }
   return pattern === undefined
@@ -151,7 +148,7 @@ function validateFilter(filter: Filter, depth = 0): void {
       value.forEach((v) => validateFilter(v, depth + 1))
     } else if (key === "not") {
       const children = Array.isArray(value) ? value : [value]
-      children.forEach((filter) => validateFilter(filter as Filter, depth + 1))
+      children.forEach((child) => validateFilter(child as Filter, depth + 1))
     } else {
       match("value", value as Selection)
     }
@@ -198,7 +195,10 @@ function predicate(filter: Filter, sets: Map<string, string>): string {
       expressions.push(
         match(
           fieldValue("state", 0),
-          values.map((v) => (v === true ? "on" : v === false ? "off" : v)) as Selection
+          values.map((v) => {
+            if (typeof v === "boolean") return v ? "on" : "off"
+            return v
+          }) as Selection
         )
       )
     } else if (key === "hidden") {
@@ -215,7 +215,7 @@ function predicate(filter: Filter, sets: Map<string, string>): string {
       const children = Array.isArray(value) ? value : [value]
       expressions.push(
         `not ${join(
-          children.map((filter) => predicate(filter as Filter, sets)),
+          children.map((child) => predicate(child as Filter, sets)),
           "or"
         )}`
       )
@@ -241,12 +241,10 @@ function candidates(filter: Filter): { source: string; trackLifecycle: boolean }
     const source = candidates(child)
     if (source.source !== "states | map(attribute='entity_id') | list") return source
   }
-  const domains =
-    filter.domain !== undefined
-      ? strings(filter.domain, "domain")
-      : filter.type !== undefined
-        ? [...new Set(strings(filter.type, "type").map((type) => type.split("/")[0]))]
-        : undefined
+  let domains: string[] | undefined
+  if (filter.domain !== undefined) domains = strings(filter.domain, "domain")
+  else if (filter.type !== undefined)
+    domains = [...new Set(strings(filter.type, "type").map((type) => type.split("/")[0]))]
   if (domains) {
     return {
       source: `(${domains.map((d) => `(states.${d} | map(attribute='entity_id') | list)`).join(" + ")})`,
@@ -258,39 +256,54 @@ function candidates(filter: Filter): { source: string; trackLifecycle: boolean }
 
 export function fieldValue(field: SortField, include: number): string {
   switch (field) {
-    case "group":
+    case "group": {
       return `ag_groups[${include}]`
-    case "area":
+    }
+    case "area": {
       return "area_name(entity)"
-    case "floor":
+    }
+    case "floor": {
       return "floor_name(entity)"
-    case "device":
+    }
+    case "device": {
       return "device_name(entity)"
-    case "label":
+    }
+    case "label": {
       return "(labels(entity) | map('label_name') | select('string') | sort | list)"
-    case "domain":
+    }
+    case "domain": {
       return "entity.split('.')[0]"
-    case "type":
+    }
+    case "type": {
       return "(entity.split('.')[0] ~ ('/' ~ state_attr(entity, 'device_class') if state_attr(entity, 'device_class') else ''))"
-    case "hidden":
+    }
+    case "hidden": {
       return "is_hidden_entity(entity)"
-    case "integration":
+    }
+    case "integration": {
       return "(config_entry_attr(config_entry_id(entity), 'domain') if config_entry_id(entity) is not none else none)"
-    case "entity_id":
+    }
+    case "entity_id": {
       return "entity"
-    case "name":
+    }
+    case "name": {
       return "entity_name(entity, fallback=true)"
-    case "state":
+    }
+    case "state": {
       return "states(entity)"
-    case "last_changed":
+    }
+    case "last_changed": {
       return "as_timestamp(states[entity].last_changed)"
-    case "last_updated":
+    }
+    case "last_updated": {
       return "as_timestamp(states[entity].last_updated)"
-    default:
+    }
+    default: {
       if (field.startsWith("attr.") && field.length > 5) {
         return `state_attr(entity, ${literal(field.slice(5))})`
       }
       throw new Error(`Unknown field: ${field}`)
+    }
   }
 }
 
@@ -355,11 +368,10 @@ function compileQuery(
     needsLifecycle ||= trackLifecycle
     const values = sorts.map((sort, index) => {
       const value = fieldValue(sort.by, group)
-      const prepared = numericSort(sort)
-        ? `(${value} | float(none))`
-        : sort.by === "group"
-          ? `([1, (${value} | lower)] if ${value} is string else [0, ${value}])`
-          : `(${value} | default('', true) | string)`
+      let prepared = `(${value} | default('', true) | string)`
+      if (numericSort(sort)) prepared = `(${value} | float(none))`
+      else if (sort.by === "group")
+        prepared = `([1, (${value} | lower)] if ${value} is string else [0, ${value}])`
       return `'sort${index}': ${prepared}`
     })
     const fields = [
@@ -385,6 +397,8 @@ function compileQuery(
     ].join("\n")
   })
   // Counting states tracks additions/removals, not ordinary changes or a full-state iteration.
+  // Candidate discovery in the map callback above can enable lifecycle tracking.
+  // oxlint-disable-next-line typescript/no-unnecessary-condition
   const lines = needsLifecycle ? ["{% set ag_lifecycle = states | count %}"] : []
   lines.push(...[...sets].map(([expression, name]) => `{% set ${name} = ${expression} %}`))
   options.forEach(({ templates }, group) =>
@@ -532,13 +546,13 @@ function groupKey(value: unknown, depth = 0): string {
 }
 
 const fieldRegistries: Partial<Record<SortField, RegistryKind[]>> = {
-  name: ["entity", "device"],
-  device: ["entity", "device"],
-  hidden: ["entity"],
   area: ["entity", "device", "area"],
+  device: ["entity", "device"],
   floor: ["entity", "device", "area", "floor"],
-  label: ["entity", "label"],
+  hidden: ["entity"],
   integration: ["entity", "integration"],
+  label: ["entity", "label"],
+  name: ["entity", "device"],
 }
 const allRegistries: RegistryKind[] = ["entity", "device", "area", "floor", "label", "integration"]
 
@@ -563,7 +577,7 @@ function registryDependencies(
   sorts.forEach((sort) => field(sort.by))
   if (group) field(group.by)
   const custom =
-    (group && group.title !== "{{ group_name }}" && /{{|{%/.test(group.title)) ||
+    Boolean(group && group.title !== "{{ group_name }}" && /{{|{%/.test(group.title)) ||
     plans.some((plan) => plan.templates.some(({ source }) => /{{|{%/.test(source)))
   if (custom) allRegistries.forEach((kind) => result.add(kind))
   return allRegistries.filter((kind) => result.has(kind))
@@ -582,11 +596,11 @@ export function normalizeResult(value: unknown, config: GridConfig): QueryResult
     keys.add(key)
     const matches = normalizeMatches(section.matches, config.query.cards.length)
     if (!matches.length) throw new Error("Query sections must not be empty")
-    for (const match of matches) {
-      if (entities.has(match.entity)) throw new Error("Entity appears in multiple groups")
-      entities.add(match.entity)
+    for (const row of matches) {
+      if (entities.has(row.entity)) throw new Error("Entity appears in multiple groups")
+      entities.add(row.entity)
     }
-    return { key, value: section.value as GroupValue, title: section.title, matches }
+    return { key, matches, title: section.title, value: section.value as GroupValue }
   })
   return { matches: sections.flatMap((section) => section.matches), sections }
 }
@@ -613,7 +627,8 @@ function normalizeGroup(value: AutoGridConfig["group"]): GroupConfig | undefined
 
 export function normalizeConfig(input: AutoGridConfig): GridConfig {
   object(input, "Auto Grid configuration")
-  const config = structuredClone(input)
+  // YAML may omit required fields despite the public TypeScript contract.
+  const config: Partial<AutoGridConfig> = structuredClone(input)
   const heading = headingConfig(config)
   for (const old of ["filter", "entities", "options"]) {
     if (old in config)
@@ -656,24 +671,21 @@ export function normalizeConfig(input: AutoGridConfig): GridConfig {
   excludes.forEach((exclude) => validateFilter(exclude))
   const plans = cards.map(compileCardOptions)
   const group = normalizeGroup(config.group)
-  const sorts =
-    config.sort === undefined
-      ? defaultSort
-      : Array.isArray(config.sort)
-        ? config.sort
-        : [config.sort]
+  let sorts: (Sort | SortField)[] = defaultSort
+  if (config.sort !== undefined) sorts = Array.isArray(config.sort) ? config.sort : [config.sort]
   const normalizedSorts = sorts.map((sort) => {
     const normalized = typeof sort === "string" ? { by: sort } : sort
     validateSort(normalized)
     return { ...normalized, by: normalized.by ?? "name" }
   })
   return {
-    heading,
-    columns: config.columns ?? 2,
-    square: config.square ?? false,
-    show_empty: config.show_empty ?? false,
     card,
+    columns: config.columns ?? 2,
+    heading,
     query: {
+      cards: plans.map((plan) => plan.card),
+      group,
+      registries: registryDependencies(includeFilters, excludes, normalizedSorts, group, plans),
       template: compileQuery(
         includeFilters,
         excludes,
@@ -683,10 +695,9 @@ export function normalizeConfig(input: AutoGridConfig): GridConfig {
         groupNames,
         plans
       ),
-      registries: registryDependencies(includeFilters, excludes, normalizedSorts, group, plans),
-      cards: plans.map((plan) => plan.card),
       templates: plans.map((plan) => plan.templates),
-      group,
     },
+    show_empty: config.show_empty ?? false,
+    square: config.square ?? false,
   }
 }
