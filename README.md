@@ -6,6 +6,8 @@ Automatic entity grids for Home Assistant.
 custom cards. Keep shared card options in YAML, let Home Assistant handle selection,
 and stop maintaining lists of entities by hand.
 
+<img width="1064" height="722" alt="image" src="https://github.com/user-attachments/assets/49a58283-2d19-40a0-a903-72369bc62b89" />
+
 ## ✨ Features
 
 - **Automatic selection** — filter by area, label, device, entity type, state,
