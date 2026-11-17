@@ -25,16 +25,22 @@ test("integration names share a cached native manifest request per connection", 
 })
 
 test("manifest failure falls back to domains and can retry on a later activation", async (t) => {
-  t.mock.method(console, "debug", () => {})
+  const warning = t.mock.method(console, "warn", () => {})
+  const offline = new Error("offline")
   let calls = 0
   const connection = testConnection({
     sendMessagePromise: async () => {
       calls++
-      if (calls === 1) throw new Error("offline")
+      if (calls === 1) throw offline
       return [{ domain: "mqtt", name: "MQTT" }]
     },
   })
   assert.deepEqual(await integrationNames(connection), {})
   assert.deepEqual(await integrationNames(connection), { mqtt: "MQTT" })
   assert.equal(calls, 2)
+  assert.equal(warning.mock.callCount(), 1)
+  assert.deepEqual(warning.mock.calls[0].arguments, [
+    "Auto Grid: integration names unavailable; using domains",
+    offline,
+  ])
 })
