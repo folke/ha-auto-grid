@@ -3,7 +3,17 @@ import { repeat } from "lit/directives/repeat.js"
 import { GridController } from "./grid.ts"
 import { AutoGridEditor, prepareEditor } from "./editor.ts"
 import { normalizeConfig } from "./query.ts"
-import type { AutoGridConfig, CardHelpers, GridConfig, HomeAssistant } from "./types.ts"
+import { visibleHeading } from "./heading.ts"
+import type {
+  AutoGridConfig,
+  CardConfig,
+  CardHelpers,
+  GridConfig,
+  HomeAssistant,
+  LovelaceCard,
+} from "./types.ts"
+
+type HeadingEntry = { signature: string; card?: LovelaceCard; error?: string }
 
 let helpers: Promise<CardHelpers> | undefined
 function loadHelpers(): Promise<CardHelpers> {
@@ -26,6 +36,7 @@ export class AutoGrid extends LitElement {
   private currentLayout?: string
   private sizeUpdate = 0
   private reportedSize = 0
+  private headings = new Map<string, HeadingEntry>()
   private grid = new GridController(
     async (config) => {
       const card = await (await loadHelpers()).createCardElement(config)
@@ -56,6 +67,7 @@ export class AutoGrid extends LitElement {
 
   set hass(hass: HomeAssistant) {
     this.currentHass = hass
+    for (const { card } of this.headings.values()) if (card?.isConnected) card.hass = hass
     this.grid.setHass(hass)
   }
 
@@ -66,6 +78,7 @@ export class AutoGrid extends LitElement {
   set preview(preview: boolean) {
     this.currentPreview = preview
     for (const { card } of this.grid.cards) card.preview = preview
+    for (const { card } of this.headings.values()) if (card) card.preview = preview
     this.gridChanged()
   }
 
@@ -76,6 +89,7 @@ export class AutoGrid extends LitElement {
   set layout(layout: string | undefined) {
     this.currentLayout = layout
     for (const { card } of this.grid.cards) card.layout = layout
+    for (const { card } of this.headings.values()) if (card) card.layout = layout
   }
 
   connectedCallback(): void {
@@ -84,6 +98,7 @@ export class AutoGrid extends LitElement {
   }
 
   disconnectedCallback(): void {
+    for (const [key, entry] of this.headings) if (!entry.card) this.headings.delete(key)
     this.grid.disconnect()
     super.disconnectedCallback()
   }
@@ -93,11 +108,79 @@ export class AutoGrid extends LitElement {
       this.config?.show_empty === false &&
       !this.currentPreview &&
       !this.grid.error &&
+      !this.headingError &&
       !this.grid.cards.length
     )
   }
 
+  private get headingError(): string | undefined {
+    if (visibleHeading(this.config?.heading) && this.headings.get("main")?.error)
+      return this.headings.get("main")!.error
+    const sections = this.grid.sections ?? []
+    if (sections.length > 1)
+      for (const section of sections) {
+        const error = this.headings.get(`group:${section.key}`)?.error
+        if (section.title && error) return error
+      }
+    return undefined
+  }
+
+  private syncHeadings(): void {
+    const desired = new Map<string, CardConfig>()
+    const known = new Set<string>()
+    if (visibleHeading(this.config?.heading)) {
+      known.add("main")
+      desired.set("main", this.config!.heading!)
+    }
+    const sections = this.grid.sections ?? []
+    for (const section of sections) {
+      const key = `group:${section.key}`
+      known.add(key)
+      if (sections.length > 1 && section.title)
+        desired.set(key, {
+          type: "heading",
+          heading_style: "subtitle",
+          heading: section.title,
+        })
+    }
+    for (const key of this.headings.keys()) if (!known.has(key)) this.headings.delete(key)
+    for (const [key, config] of desired) {
+      const signature = JSON.stringify(config)
+      const previous = this.headings.get(key)
+      if (previous?.card && this.currentHass) previous.card.hass = this.currentHass
+      if (previous?.signature === signature) continue
+      if (previous?.card?.setConfig) {
+        previous.signature = signature
+        try {
+          previous.card.setConfig(structuredClone(config))
+          previous.error = undefined
+        } catch (error) {
+          previous.error = String((error as Error).message ?? error)
+        }
+        continue
+      }
+      const entry: HeadingEntry = { signature }
+      this.headings.set(key, entry)
+      void loadHelpers()
+        .then((helpers) => helpers.createCardElement(structuredClone(config)))
+        .then((card) => {
+          if (this.headings.get(key) !== entry) return
+          entry.card = card
+          if (this.currentHass) card.hass = this.currentHass
+          card.preview = this.currentPreview
+          card.layout = this.currentLayout
+          this.gridChanged()
+        })
+        .catch((error: unknown) => {
+          if (this.headings.get(key) !== entry) return
+          entry.error = String((error as Error).message ?? error)
+          this.gridChanged()
+        })
+    }
+  }
+
   private gridChanged(): void {
+    this.syncHeadings()
     // Don't set `hidden`: HA removes hidden cards from the DOM, preventing query recovery.
     this.toggleAttribute("empty", this.hideEmpty)
     this.requestUpdate()
@@ -139,7 +222,7 @@ export class AutoGrid extends LitElement {
         size += Math.max(...heights.slice(i, i + columns))
     }
     const contentSize = size || (this.hideEmpty ? 0 : 1)
-    return contentSize + (contentSize && this.config?.title ? 1 : 0)
+    return contentSize + (contentSize && visibleHeading(this.config?.heading) ? 1 : 0)
   }
 
   getGridOptions(): { columns: number; rows: string; min_columns: number } {
@@ -149,17 +232,29 @@ export class AutoGrid extends LitElement {
   protected render() {
     if (this.hideEmpty) return nothing
     return html`${
-      this.config?.title ? html`<h1 class="card-header">${this.config.title}</h1>` : nothing
+      visibleHeading(this.config?.heading)
+        ? html`<div class="card-header">${this.headings.get("main")?.card ?? nothing}</div>`
+        : nothing
     }${this.renderContent()}`
   }
 
   private renderContent() {
-    if (this.grid.error) {
+    const error = this.grid.error ?? this.headingError
+    if (error) {
       return html`<ha-card
         ><div class="message" role="alert">
           <strong>Auto Grid</strong>
-          <div>${this.grid.error}</div>
-          <button @click=${() => this.grid.retry()}>Retry</button>
+          <div>${error}</div>
+          <button
+            @click=${() => {
+              if (this.headingError) {
+                for (const [key, entry] of this.headings) if (entry.error) this.headings.delete(key)
+                this.gridChanged()
+              } else this.grid.retry()
+            }}
+          >
+            Retry
+          </button>
         </div></ha-card
       >`
     }
@@ -176,7 +271,7 @@ export class AutoGrid extends LitElement {
       ({ key }) => key,
       (section) =>
         html` <section class="section">
-          ${sections.length > 1 && section.title ? html`<h2 class="group-header">${section.title}</h2>` : nothing}
+          ${sections.length > 1 && section.title ? html`<div class="group-header">${this.headings.get(`group:${section.key}`)?.card ?? nothing}</div>` : nothing}
           <div
             class="grid"
             style=${this.config?.columns === "auto" ? `--auto-grid-columns: ${section.cards.length}` : nothing}
@@ -200,27 +295,13 @@ export class AutoGrid extends LitElement {
       display: none !important;
     }
     .card-header {
-      color: var(--ha-card-header-color, var(--primary-text-color));
-      text-align: var(--ha-stack-title-text-align, start);
-      font-family: var(--ha-card-header-font-family, inherit);
-      font-size: var(--ha-card-header-font-size, var(--ha-font-size-2xl, 24px));
-      font-weight: var(--ha-font-weight-normal, 400);
-      margin-block: 0;
-      letter-spacing: -0.012em;
-      line-height: var(--ha-line-height-condensed, 1.2);
-      display: block;
-      padding: 24px 16px 16px;
+      margin-bottom: var(--auto-grid-gap, var(--grid-card-gap, 8px));
     }
     .section + .section {
       margin-top: 16px;
     }
     .group-header {
-      color: var(--secondary-text-color);
-      font-size: var(--ha-font-size-m, 16px);
-      font-weight: var(--ha-font-weight-medium, 500);
-      line-height: var(--ha-line-height-normal, 1.5);
-      margin: 0;
-      padding: 8px;
+      margin-bottom: var(--auto-grid-gap, var(--grid-card-gap, 8px));
     }
     .grid {
       display: grid;

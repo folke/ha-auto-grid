@@ -71,8 +71,16 @@ export interface Sort {
   reverse?: boolean
 }
 
+export type HeadingConfig = Partial<CardConfig> & {
+  heading?: string
+  heading_style?: "title" | "subtitle"
+  icon?: string
+  badges?: unknown[]
+}
+
 export interface AutoGridConfig {
   type?: string
+  heading?: string | HeadingConfig
   title?: string
   columns?: number | "auto"
   square?: boolean
@@ -128,7 +136,7 @@ export interface CompiledQuery {
 }
 
 export interface GridConfig {
-  title?: string
+  heading?: CardConfig
   columns: number | "auto"
   square: boolean
   show_empty: boolean

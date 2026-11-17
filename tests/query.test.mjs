@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { fieldValue, normalizeConfig, normalizeMatches } from "../src/query.ts"
+import { fieldValue, normalizeMatches } from "../src/query.ts"
+import { normalizeConfig } from "../src/query.ts"
 
 const query = (include, extra = {}) => normalizeConfig({ include, ...extra }).query.template
 
@@ -34,10 +35,13 @@ test("columns accepts positive integers or auto without changing backend queries
 
 test("title is optional presentation configuration and does not change the query", () => {
   const base = normalizeConfig({ include: { domain: "light" } })
-  assert.equal(base.title, undefined)
+  assert.equal(base.heading, undefined)
   for (const title of ["Pool lights", "", "<b>Lights</b>"]) {
     const config = normalizeConfig({ include: { domain: "light" }, title })
-    assert.equal(config.title, title)
+    assert.deepEqual(
+      config.heading,
+      title ? { type: "heading", heading_style: "title", heading: title } : undefined
+    )
     assert.equal(config.query.template, base.query.template)
     assert.deepEqual(config.query.cards, base.query.cards)
   }
@@ -342,7 +346,7 @@ test("invalid configuration is rejected early", () => {
     { include: null },
     { include: [null] },
   ])
-    assert.throws(() => normalizeConfig(config), undefined, JSON.stringify(config))
+    assert.throws(() => normalizeConfig(config), JSON.stringify(config))
 })
 
 test("quotes user input rather than interpolating Jinja source", () => {

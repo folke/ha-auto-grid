@@ -10,26 +10,22 @@ It works in Sections and other dashboard views. Generated cards can use
 
 ## Installation
 
-Build with `pnpm install && pnpm build`, then copy `dist/auto-grid.js` to your HA
-`www` directory. Register it under **Settings → Dashboards → Resources** as a JavaScript
-module. For example:
+[![Open your Home Assistant instance and open a repository in the Marketplace.](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=folke&repository=ha-auto-grid&category=plugin)
 
-```yaml
-url: /local/auto-grid.js
-type: module
-```
-
-For the local deploy recipe below, use `/local/community/ha-auto-grid/auto-grid.js`.
 Refresh the browser after registering or updating the resource. Add a **Manual** card
 and paste one of the configurations below. A focused visual editor is available for
 layout and the shared `card:` configuration; selection rules remain YAML-based.
 
 ## Visual editor
 
-The editor uses three independent collapsible sections, matching HA's card editors:
+The editor uses four independent collapsible sections, matching HA's card editors:
 
-- **Content** starts collapsed: title, columns (`auto` is supported), square cells, and
+- **Grid** starts collapsed: columns (`auto` is supported), square cells, and
   **Show when empty**, in a compact form. Columns help appears under its own field.
+- **Heading** starts collapsed: HA's native Heading editor is always available, with
+  no extra show/hide toggle. Clearing the text hides the heading unless an icon or
+  badges remain. Empty initialization doesn't save a heading. Heading YAML is
+  available as a fallback. Editing a legacy `title` migrates it to `heading`.
 - **Selection** starts expanded: a naturally sized YAML editor for `include`, `exclude`,
   `group`, `sort`, and `limit`. It replaces only those fields; omitting a key removes
   that setting. Per-include card overrides remain part of this YAML. A valid selection
@@ -70,7 +66,7 @@ The editor is bundled into `auto-grid.js`, so no additional resource is needed.
 
 ```yaml
 type: custom:auto-grid
-title: Pool lights
+heading: Pool lights
 columns: 2
 include:
   area: pool
@@ -83,7 +79,7 @@ card:
 
 `card.type` defaults to `tile`, `columns` to `2`, and `square` to `false`.
 Results are sorted alphabetically by name by default, regardless of include rules.
-An optional `title` appears above the grid with native grid-card header styling.
+An optional `heading` uses HA's native heading card with Title style by default.
 It hides together with the grid when empty and `show_empty` is false.
 
 Custom entity-based cards work too:
@@ -254,7 +250,7 @@ for each selected entity:
 
 ```yaml
 type: custom:auto-grid
-title: Container Updates
+heading: Container Updates
 columns: 2
 include:
   type: update
@@ -287,6 +283,47 @@ static configuration for those includes is embedded in the backend query to prov
 context or the templates may therefore reopen the query. Syntax/runtime template
 errors use the card's normal error display and Retry flow.
 
+## Heading
+
+A string is shorthand for a native Title-style heading:
+
+```yaml
+heading: Office
+```
+
+The full form accepts native heading options, without needing `type: heading`:
+
+```yaml
+heading:
+  heading: Office
+  heading_style: title
+  icon: mdi:desk
+  tap_action:
+    action: navigate
+    navigation_path: /dashboard-home/office
+  badges:
+    - type: entity
+      entity: sensor.office_temperature
+```
+
+The main heading defaults to `heading_style: title`; you can select `subtitle` in the
+native editor if preferred. Badges receive live `hass` updates normally. Heading text,
+icons, actions, and badges follow native HA behavior; Auto Grid `$` templates are not
+supported here. Use `group.title` for templated group labels and native badges for
+live values. An empty heading with no icon or badges takes no space.
+
+For compatibility, `title: Office` remains an alias for `heading: Office`. Do not set
+both. The visual editor writes `heading` when you edit a legacy title. Clearing a
+plain text heading removes either form; icon-only and badge-only headings remain
+supported. The heading configuration does not affect the backend
+selection query. Heading elements are retained and reconfigured only when their
+options change; ordinary `hass` updates are simply forwarded.
+
+Group headings also use actual native heading cards, always with Subtitle style.
+Their text still comes from `fieldTitle()` or `group.title`, and their configuration
+is not exposed separately in the visual editor. Single-group heading suppression,
+empty/loading hiding, and Masonry sizing notifications all remain supported.
+
 ## Grouping
 
 Grouping adds section-style headings and a fresh grid for each group. It is disabled
@@ -295,7 +332,7 @@ how the results are presented.
 
 ```yaml
 type: custom:auto-grid
-title: Controls
+heading: Controls
 include:
   - group: Lights
     domain: light
@@ -387,7 +424,7 @@ heading but keeps a separate grid. Empty groups never render. If only one group
 remains, its heading is automatically hidden, including custom headings; the grid
 keeps its cards and reserves no header height. Titles are still evaluated, so a
 second group appearing restores headings without a new subscription. The top-level
-`title` stays visible and `show_empty` retains its usual behavior for the whole card.
+`heading` stays visible and `show_empty` retains its usual behavior for the whole card.
 
 ## Filter rules
 
@@ -637,7 +674,8 @@ model rather than the legacy/composed `friendly_name` attribute. It does not eva
 | `include`    | Required         | A selection filter or list; groups may override `card`                    |
 | `exclude`    | —                | A global exclusion filter or list                                         |
 | `card`       | `{ type: tile }` | Shared child-card configuration; `entity` is reserved                     |
-| `title`      | —                | Optional text heading above the grid                                      |
+| `heading`    | —                | Native heading config or text shorthand; defaults to Title style          |
+| `title`      | —                | Compatibility text alias for `heading`; cannot be combined with it        |
 | `columns`    | `2`              | Positive integer for fixed columns, or `auto` for a single horizontal row |
 | `square`     | `false`          | Square cells, like the native grid card                                   |
 | `show_empty` | `false`          | Show loading/empty placeholders instead of hiding the grid                |

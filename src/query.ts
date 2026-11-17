@@ -1,4 +1,5 @@
 import { compileCardOptions, mergeCardOptions, validateCardOptions } from "./card-templates.ts"
+import { headingConfig } from "./heading.ts"
 import type {
   AutoGridConfig,
   CardConfig,
@@ -613,9 +614,7 @@ function normalizeGroup(value: AutoGridConfig["group"]): GroupConfig | undefined
 export function normalizeConfig(input: AutoGridConfig): GridConfig {
   object(input, "Auto Grid configuration")
   const config = structuredClone(input)
-  if (config.title !== undefined && typeof config.title !== "string") {
-    throw new Error("title must be a string")
-  }
+  const heading = headingConfig(config)
   for (const old of ["filter", "entities", "options"]) {
     if (old in config)
       throw new Error(`${old} is no longer supported; use include/exclude and card`)
@@ -669,7 +668,7 @@ export function normalizeConfig(input: AutoGridConfig): GridConfig {
     return { ...normalized, by: normalized.by ?? "name" }
   })
   return {
-    title: config.title,
+    heading,
     columns: config.columns ?? 2,
     square: config.square ?? false,
     show_empty: config.show_empty ?? false,

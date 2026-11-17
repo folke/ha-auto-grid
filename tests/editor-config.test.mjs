@@ -27,7 +27,8 @@ test("editor card values inject type and temporary entity without mutating confi
   const value = cardEditorValue(config, "light.preview")
   assert.equal(value.type, "tile")
   assert.equal(value.entity, "light.preview")
-  value.name.type = "device"
+  const name = value.name
+  name.type = "device"
   assert.deepEqual(config, before)
   assert.equal(updateCard(config, cardEditorValue(config, "light.preview"), true), config)
   assert.equal(
@@ -47,11 +48,13 @@ test("visual updates change only the global card and never save preview entities
     },
     true
   )
+  assert.ok(next.card)
   assert.equal(next.card.icon, "mdi:lightbulb")
   assert.equal(next.card.entity, undefined)
   assert.equal(next.card.primary, "{{ entity_name(entity) }}")
   for (const key of ["include", "exclude", "group", "sort", "styler", "visibility"])
     assert.deepEqual(next[key], config[key])
+  assert.ok(Array.isArray(next.include) && next.include[0].card)
   next.include[0].card.icon = "changed"
   assert.equal(config.include[0].card.icon, "mdi:lamp")
 })
@@ -78,20 +81,17 @@ test("card YAML preserves $ templates and rejects invalid/ambiguous values", () 
 
 test("layout edits preserve queries and avoid materializing unrelated defaults", () => {
   assert.deepEqual(layoutData(config), {
-    title: "",
     columns: "2",
     square: false,
     show_empty: false,
   })
   assert.equal(updateLayout(config, layoutData(config)), config)
-  const next = updateLayout(config, { title: "Office" })
-  assert.equal(next.title, "Office")
+  const next = updateLayout(config, { square: true })
   assert.equal(next.columns, undefined)
-  assert.equal(next.square, undefined)
+  assert.equal(next.square, true)
   assert.equal(next.show_empty, undefined)
   assert.deepEqual(next.card, config.card)
   assert.deepEqual(next.include, config.include)
-  assert.equal(updateLayout(next, { title: "" }).title, undefined)
   assert.equal(updateLayout(config, { columns: "auto" }).columns, "auto")
   assert.equal(updateLayout(config, { columns: "4" }).columns, 4)
   assert.equal(updateLayout(config, { columns: 4 }).columns, 4)
@@ -106,11 +106,17 @@ test("layout edits preserve queries and avoid materializing unrelated defaults",
 })
 
 test("selection YAML owns only query fields, preserving card/layout/extra root options", () => {
-  const original = { ...structuredClone(config), title: "Office", columns: "auto", limit: 5 }
+  const original = {
+    ...structuredClone(config),
+    title: "Office",
+    columns: "auto",
+    limit: 5,
+  }
   const data = selectionData(original)
   assert.deepEqual(Object.keys(data), ["include", "exclude", "group", "sort", "limit"])
   assert.equal(updateSelection(original, data), original)
-  data.include[0].card.icon = "changed"
+  const includes = data.include
+  includes[0].card.icon = "changed"
   assert.equal(original.include[0].card.icon, "mdi:lamp")
   const next = updateSelection(original, { include: config.include, sort: "name", limit: 2 })
   assert.deepEqual(next.include, config.include)

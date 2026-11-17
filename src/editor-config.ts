@@ -1,5 +1,6 @@
 import { validateCardOptions } from "./card-templates.ts"
 import { normalizeConfig } from "./query.ts"
+import { headingConfig } from "./heading.ts"
 import type { AutoGridConfig, CardConfig } from "./types.ts"
 
 export function hasCardTemplates(value: unknown): boolean {
@@ -40,6 +41,34 @@ export function updateCard(config: AutoGridConfig, value: unknown, visual = fals
   return { ...structuredClone(config), card }
 }
 
+export function headingEditorValue(config: AutoGridConfig): CardConfig {
+  return headingConfig(config) ?? { type: "heading", heading_style: "title", heading: "" }
+}
+
+export function updateHeading(config: AutoGridConfig, value: unknown): AutoGridConfig {
+  const result = structuredClone(config)
+  if (value === undefined) {
+    delete result.heading
+    delete result.title
+  } else {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      throw new Error("Heading must be an object")
+    const card = structuredClone(value) as Partial<CardConfig>
+    const normalized = headingConfig({ heading: card })
+    const current = headingEditorValue(config)
+    const comparable = { ...normalized, heading: normalized?.heading ?? "" }
+    if (sameConfig(comparable, { ...current, heading: current.heading ?? "" })) return config
+    if (sameConfig(comparable, { type: "heading", heading_style: "title", heading: "" })) {
+      delete result.heading
+    } else {
+      delete card.type
+      result.heading = card
+    }
+    delete result.title
+  }
+  return sameConfig(config, result) ? config : result
+}
+
 export const selectionKeys = ["include", "exclude", "group", "sort", "limit"] as const
 
 export function selectionData(config: AutoGridConfig): Record<string, unknown> {
@@ -68,7 +97,6 @@ export function updateSelection(config: AutoGridConfig, value: unknown): AutoGri
 
 export function layoutData(config: AutoGridConfig): Record<string, unknown> {
   return {
-    title: config.title ?? "",
     columns: String(config.columns ?? 2),
     square: config.square ?? false,
     show_empty: config.show_empty ?? false,
@@ -82,11 +110,6 @@ export function updateLayout(
   const current = layoutData(config)
   const data = { ...current, ...value }
   const result = structuredClone(config)
-  if (!sameConfig(data.title, current.title)) {
-    if (data.title === undefined || data.title === null || data.title === "") delete result.title
-    else if (typeof data.title === "string") result.title = data.title
-    else throw new Error("Title must be text")
-  }
   if (!sameConfig(data.columns, current.columns)) {
     if (
       data.columns != null &&

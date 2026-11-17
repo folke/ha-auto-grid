@@ -155,12 +155,16 @@
         const main = await makeEditor(base, true)
         const { editor, changes } = main
         const root = editor.shadowRoot
-        const content = root.querySelector("ha-expansion-panel.content")
+        const content = root.querySelector("ha-expansion-panel.grid")
         const selectionPanel = root.querySelector("ha-expansion-panel.selection")
         const cardPanel = root.querySelector("ha-expansion-panel.card")
+        const headingPanel = root.querySelector("ha-expansion-panel.heading")
         assert(
-          !content.expanded && selectionPanel.expanded && !cardPanel.expanded,
-          "Content/Card start collapsed and Selection starts expanded"
+          !content.expanded &&
+            !headingPanel.expanded &&
+            selectionPanel.expanded &&
+            !cardPanel.expanded,
+          "Grid/Heading/Card start collapsed and Selection starts expanded"
         )
         const selection = root.querySelector("ha-yaml-editor.selection-yaml")
         assert(
@@ -176,7 +180,7 @@
         const firstQuery = queries()[0]
         firstQuery.callback({ result: result(base, ["light.preview", "light.other"]) })
         await tick()
-        let native = root.querySelector("hui-card-element-editor")
+        let native = root.querySelector("hui-card-element-editor.card-native")
         assert(
           native?.hass === hass && native.lovelace === editor.lovelace,
           "native editor receives HA context"
@@ -223,8 +227,10 @@
         selection.style.cssText = ""
         const layout = root.querySelector("ha-form")
         assert(
-          layout.schema[0].type === "grid" && layout.schema[0].schema.length === 4,
-          "content controls use a compact grid"
+          layout.schema[0].name === "columns" &&
+            layout.schema[1].type === "grid" &&
+            layout.schema[1].schema.length === 2,
+          "Grid controls use a compact form"
         )
         assert(
           layout.computeLabel({ name: "show_empty" }) === "Show when empty",
@@ -270,19 +276,16 @@
         editor.setConfig(changes[0])
         await tick()
         assert(
-          root.querySelector("hui-card-element-editor") === native &&
+          root.querySelector("hui-card-element-editor.card-native") === native &&
             root.querySelector("ha-yaml-editor.selection-yaml") === selection,
           "config echoes retain both child editors"
         )
         const subscriptionsBeforeLayout = queries().length
         emit(layout, "value-changed", {
-          value: { ...layout.data, title: "Office", columns: "auto" },
+          value: { ...layout.data, columns: "auto" },
         })
         await tick()
-        assert(
-          changes.at(-1).title === "Office" && changes.at(-1).columns === "auto",
-          "compact content controls support layout edits"
-        )
+        assert(changes.at(-1).columns === "auto", "compact Grid controls support layout edits")
         assert(
           changes.at(-1).square === undefined && changes.at(-1).show_empty === undefined,
           "unrelated defaults stay omitted"
@@ -290,6 +293,41 @@
         assert(
           queries().length === subscriptionsBeforeLayout,
           "layout/static card edits don't reopen sample or preview queries"
+        )
+        assert(!headingPanel.querySelector("ha-form"), "Heading has no redundant show toggle")
+        const headingNative = root.querySelector("hui-card-element-editor.heading-native")
+        assert(
+          headingNative.value.type === "heading" && headingNative.value.heading_style === "title",
+          "Heading panel embeds the native title-style editor"
+        )
+        const headingSaved = changes.length
+        emit(headingNative, "config-changed", { config: headingNative.value })
+        await tick()
+        assert(
+          changes.length === headingSaved,
+          "native heading initialization doesn't rewrite config"
+        )
+        emit(headingNative, "config-changed", {
+          config: {
+            ...headingNative.value,
+            heading: "Office",
+            icon: "mdi:desk",
+            badges: [{ type: "entity", entity: "sensor.office_temperature" }],
+            tap_action: { action: "navigate", navigation_path: "/office" },
+          },
+        })
+        await tick()
+        assert(
+          changes.at(-1).heading.heading === "Office" &&
+            changes.at(-1).heading.icon === "mdi:desk" &&
+            changes.at(-1).heading.badges.length === 1 &&
+            changes.at(-1).title === undefined,
+          "native heading edits preserve badges/actions and write heading rather than title"
+        )
+        assert(
+          queries().length === subscriptionsBeforeLayout &&
+            root.querySelector("hui-card-element-editor.card-native") === native,
+          "heading edits preserve selection subscriptions and the child card editor"
         )
         const saved = changes.length
         emit(layout, "value-changed", { value: { ...layout.data, columns: "0" } })
@@ -327,7 +365,8 @@
           "collapsing preserves invalid selection drafts"
         )
         assert(
-          root.querySelector("hui-card-element-editor") === native && native.isConnected,
+          root.querySelector("hui-card-element-editor.card-native") === native &&
+            native.isConnected,
           "collapsed card editor stays mounted"
         )
         emit(selection, "value-changed", {
@@ -355,7 +394,7 @@
         )
         assert(
           changedSelection.card.icon === "mdi:lightbulb" &&
-            changedSelection.title === "Office" &&
+            changedSelection.heading.heading === "Office" &&
             changedSelection.columns === 3 &&
             JSON.stringify(changedSelection.styler) === JSON.stringify(base.styler),
           "selection YAML preserves card/layout/unrelated options"
@@ -411,7 +450,7 @@
           "$ options stay literal and force safe card YAML"
         )
         assert(
-          !root.querySelector("hui-card-element-editor"),
+          !root.querySelector("hui-card-element-editor.card-native"),
           "native editors never receive unknown $ keys"
         )
         const beforeBadEntity = changes.length
@@ -429,7 +468,7 @@
         await tick()
         cardPanel.querySelector("button").click()
         await tick()
-        native = root.querySelector("hui-card-element-editor")
+        native = root.querySelector("hui-card-element-editor.card-native")
         assert(
           native?.value.type === "custom:mushroom-template-card" &&
             native.value.primary === "{{ entity }}",
@@ -451,6 +490,32 @@
           JSON.stringify(base) === JSON.stringify(before),
           "all interactions preserve caller-owned input"
         )
+        const lastHeadingNative = root.querySelector("hui-card-element-editor.heading-native")
+        emit(lastHeadingNative, "config-changed", {
+          config: { type: "heading", heading_style: "title", heading: "" },
+        })
+        await tick()
+        assert(
+          changes.at(-1).heading === undefined &&
+            changes.at(-1).title === undefined &&
+            root.querySelector("hui-card-element-editor.heading-native") === lastHeadingNative,
+          "clearing all heading content removes it without removing its editor"
+        )
+        const emptyHeadingSaves = changes.length
+        emit(lastHeadingNative, "config-changed", { config: lastHeadingNative.value })
+        await tick()
+        assert(changes.length === emptyHeadingSaves, "empty heading initialization stays unsaved")
+        headingPanel.querySelector("button").click()
+        await tick()
+        const beforeDetachedHeading = changes.length
+        emit(lastHeadingNative, "config-changed", {
+          config: { type: "heading", heading: "Stale heading" },
+        })
+        await tick()
+        assert(
+          changes.length === beforeDetachedHeading,
+          "late events from a removed heading editor are ignored"
+        )
         main.remove()
         await tick()
         assert(
@@ -465,7 +530,9 @@
         )
         templated.remove()
         const noDefaults = await makeEditor({ include: { type: "light" } })
-        const autoNative = noDefaults.editor.shadowRoot.querySelector("hui-card-element-editor")
+        const autoNative = noDefaults.editor.shadowRoot.querySelector(
+          "hui-card-element-editor.card-native"
+        )
         queries().at(-1).callback({ result: [] })
         await tick()
         assert(!("entity" in autoNative.value), "no matches leave the native picker unset")
@@ -481,6 +548,28 @@
           requests.every((item) => item.stopped),
           "standalone sample query also cleans up"
         )
+        const legacy = await makeEditor({ ...base, title: "Legacy" })
+        const legacyRoot = legacy.editor.shadowRoot
+        const legacyNative = legacyRoot.querySelector("hui-card-element-editor.heading-native")
+        assert(
+          legacyNative.value.heading === "Legacy",
+          "legacy title pre-fills the native Heading editor"
+        )
+        emit(legacyNative, "config-changed", { config: legacyNative.value })
+        await tick()
+        assert(legacy.changes.length === 0, "opening a legacy title does not migrate until an edit")
+        emit(legacyNative, "config-changed", {
+          config: { ...legacyNative.value, icon: "mdi:home" },
+        })
+        await tick()
+        assert(
+          legacy.changes.at(-1).heading.heading === "Legacy" &&
+            legacy.changes.at(-1).heading.icon === "mdi:home" &&
+            legacy.changes.at(-1).title === undefined,
+          "editing a legacy title writes heading without leaving a conflicting alias"
+        )
+        legacy.remove()
+        await tick()
         document.body.dataset.status = "passed"
         document.querySelector("#result").textContent = `Passed ${assertions} browser assertions`
       } catch (error) {

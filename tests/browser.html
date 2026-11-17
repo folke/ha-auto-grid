@@ -20,6 +20,9 @@
         const registrySubscriptions = []
         let stops = 0
         let created = 0
+        let failHeadings = false
+        let holdHeadings = false
+        const pendingHeadings = []
         class TestTile extends HTMLElement {
           setConfig(config) {
             this.setCount = (this.setCount ?? 0) + 1
@@ -31,13 +34,27 @@
           }
         }
         customElements.define("test-tile", TestTile)
+        class TestHeading extends TestTile {
+          setConfig(config) {
+            super.setConfig(config)
+            this.textContent = config.heading ?? ""
+          }
+        }
+        customElements.define("test-heading", TestHeading)
         window.loadCardHelpers = async () => ({
           createCardElement(config) {
-            created++
+            if (config.type !== "heading") created++
             const card = document.createElement(
-              config.type === "custom:auto-grid" ? "auto-grid" : "test-tile"
+              config.type === "heading"
+                ? "test-heading"
+                : config.type === "custom:auto-grid"
+                  ? "auto-grid"
+                  : "test-tile"
             )
             card.setConfig(config)
+            if (config.type === "heading" && failHeadings) throw new Error("Heading helper failed")
+            if (config.type === "heading" && holdHeadings)
+              return new Promise((resolve) => pendingHeadings.push({ config, card, resolve }))
             return card
           },
         })
@@ -192,17 +209,56 @@
           "column configuration"
         )
         assert(
-          grid.shadowRoot.querySelector("h1.card-header").textContent === "Pool lights",
+          grid.shadowRoot.querySelector(".card-header").textContent === "Pool lights",
           "renders a native-style grid heading"
         )
         assert((await grid.getCardSize()) === 2, "title contributes to card size")
         assert(tiles()[0] === b, "adding a title preserves existing cards")
+        const mainHeading = grid.shadowRoot.querySelector(".card-header test-heading")
+        assert(
+          mainHeading?.config.type === "heading" && mainHeading.config.heading_style === "title",
+          "legacy title creates an actual native Title heading card"
+        )
         grid.setConfig({ ...config, columns: 3, title: "<img src=x onerror=alert(1)>" })
         await tick()
         assert(
           grid.shadowRoot.querySelector(".card-header").textContent ===
             "<img src=x onerror=alert(1)>" && !grid.shadowRoot.querySelector("img"),
           "title renders as text, not HTML"
+        )
+        grid.setConfig({
+          ...config,
+          columns: 3,
+          heading: {
+            heading: "Office",
+            icon: "mdi:desk",
+            badges: [{ type: "entity", entity: "sensor.temperature" }],
+            tap_action: { action: "navigate", navigation_path: "/office" },
+          },
+        })
+        await tick()
+        assert(
+          grid.shadowRoot.querySelector(".card-header test-heading") === mainHeading &&
+            mainHeading.config.icon === "mdi:desk" &&
+            mainHeading.config.badges[0].entity === "sensor.temperature",
+          "heading edits reuse the native element and preserve badges/actions"
+        )
+        grid.preview = true
+        grid.layout = "sections"
+        assert(
+          mainHeading.hass === grid.hass &&
+            mainHeading.preview === true &&
+            mainHeading.layout === "sections",
+          "native headings receive hass, preview, and layout"
+        )
+        grid.preview = false
+        grid.layout = undefined
+        const headingUpdates = mainHeading.setCount
+        for (let i = 0; i < 20; i++) grid.hass = { ...hass, states: { changed: i } }
+        await tick()
+        assert(
+          mainHeading.setCount === headingUpdates,
+          "hass updates don't reconfigure native headings"
         )
         grid.setConfig({ ...config, columns: 3 })
         await tick()
@@ -353,6 +409,11 @@
           tiles()[0] === retainedA && tiles()[1] === tile && subscriptions.length === 5,
           "grouped layout changes preserve retained cards and subscriptions"
         )
+        const subtitle = grid.shadowRoot.querySelector(".group-header test-heading")
+        assert(
+          subtitle?.config.type === "heading" && subtitle.config.heading_style === "subtitle",
+          "group labels use native Subtitle heading cards"
+        )
         const createdBeforeMove = created
         emitSections([
           section("Pool", "<img src=x>", ["light.a"]),
@@ -386,6 +447,7 @@
           "a single group's heading is suppressed"
         )
         assert((await grid.getCardSize()) === 1, "a single group reserves no header height")
+        assert(!subtitle.isConnected, "suppressed native group heading is not left in the DOM")
         grid.setConfig({ ...config, group: "area", title: "Grouped controls" })
         await tick()
         assert(
@@ -805,6 +867,60 @@
           masonryRequests.every(({ closed }) => closed),
           "Masonry removal releases nested queries and registry listeners"
         )
+        holdHeadings = true
+        const delayedHeading = document.createElement("auto-grid")
+        delayedHeading.setConfig({
+          include: { entity_id: "light.delayed_heading" },
+          heading: "Old",
+          show_empty: true,
+        })
+        delayedHeading.hass = hass
+        document.body.append(delayedHeading)
+        await tick()
+        delayedHeading.setConfig({
+          include: { entity_id: "light.delayed_heading" },
+          heading: "New",
+          show_empty: true,
+        })
+        await tick()
+        const oldPending = pendingHeadings.find((entry) => entry.config.heading === "Old")
+        const newPending = pendingHeadings.find((entry) => entry.config.heading === "New")
+        newPending.resolve(newPending.card)
+        await tick()
+        oldPending.resolve(oldPending.card)
+        await tick()
+        assert(
+          delayedHeading.shadowRoot.querySelector(".card-header").textContent === "New",
+          "late heading creation can't overwrite a newer heading"
+        )
+        delayedHeading.remove()
+        holdHeadings = false
+        failHeadings = true
+        const brokenHeading = document.createElement("auto-grid")
+        brokenHeading.setConfig({
+          include: { entity_id: "light.broken_heading" },
+          heading: "Recovered",
+          show_empty: true,
+        })
+        brokenHeading.hass = hass
+        document.body.append(brokenHeading)
+        await tick()
+        assert(
+          brokenHeading.shadowRoot
+            .querySelector('[role="alert"]')
+            ?.textContent.includes("Heading helper failed"),
+          "heading factory errors are surfaced"
+        )
+        failHeadings = false
+        brokenHeading.shadowRoot.querySelector("button").click()
+        await tick()
+        assert(
+          brokenHeading.shadowRoot.querySelector(".card-header").textContent === "Recovered" &&
+            !brokenHeading.shadowRoot.querySelector('[role="alert"]'),
+          "heading helper errors can retry without reopening the entity query"
+        )
+        brokenHeading.remove()
+
         observer.disconnect()
         grid.remove()
         await tick()
