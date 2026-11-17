@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/folke/ha-auto-grid/compare/v0.1.0...v0.1.1) (2026-11-17)
+
+
+### Bug Fixes
+
+* report card visibility so that HA can fully hide on `show_empty: false` ([af17af8](https://github.com/folke/ha-auto-grid/commit/af17af8a5a80bed9f8dab441ad3767181fcc0425))
+
 ## 0.1.0 (2026-11-17)
 
 

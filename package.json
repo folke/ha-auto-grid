@@ -1,6 +1,6 @@
 {
   "name": "ha-auto-grid",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Automatically populated Home Assistant card grids with backend filtering and shared card configuration.",
   "author": "Folke Lemaitre",
