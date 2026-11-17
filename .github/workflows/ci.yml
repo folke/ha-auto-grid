@@ -17,18 +17,14 @@ permissions:
 
 jobs:
   build:
-    if: github.event_name != 'schedule'
+    if: >-
+      github.event_name != 'schedule' &&
+      !(github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
     runs-on: ubuntu-latest
-    outputs:
-      sha: ${{ steps.revision.outputs.sha }}
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.release_tag || github.sha }}
           persist-credentials: false
-      - name: Record verified commit
-        id: revision
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
@@ -76,23 +72,66 @@ jobs:
           manifest-file: .github/release-please-manifest.json
           target-branch: main
 
-  publish:
-    needs: [build, release]
+  release-build:
+    needs: release
     if: >-
-      !cancelled() && needs.build.result == 'success' &&
+      !cancelled() &&
       (needs.release.outputs.release_created == 'true' ||
        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.release_tag != ''))
+    runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.release-ref.outputs.tag_name }}
+      sha: ${{ steps.release-ref.outputs.sha }}
+    env:
+      RELEASE_TAG: ${{ needs.release.outputs.tag_name || inputs.release_tag }}
+    steps:
+      - name: Resolve published release to an immutable commit
+        id: release-ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          gh release view "$RELEASE_TAG" --json tagName
+          release_sha=$(gh api "repos/$GH_REPO/commits/$RELEASE_TAG" --jq .sha)
+          echo "sha=$release_sha" >> "$GITHUB_OUTPUT"
+          echo "tag_name=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.release-ref.outputs.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Formatting is checked in normal CI, not when rebuilding a historical release.
+      - run: pnpm check
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: auto-grid-release
+          path: dist/auto-grid.js
+          if-no-files-found: error
+          overwrite: true
+
+  publish:
+    needs: release-build
+    if: ${{ !cancelled() && needs.release-build.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     concurrency:
-      group: release-asset-${{ needs.release.outputs.tag_name || inputs.release_tag }}
+      group: release-asset-${{ needs.release-build.outputs.tag_name }}
       cancel-in-progress: false
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      RELEASE_TAG: ${{ needs.release.outputs.tag_name || inputs.release_tag }}
-      BUILD_SHA: ${{ needs.build.outputs.sha }}
+      RELEASE_TAG: ${{ needs.release-build.outputs.tag_name }}
+      BUILD_SHA: ${{ needs.release-build.outputs.sha }}
     steps:
       - name: Check release matches the verified build
         shell: bash
@@ -105,16 +144,17 @@ jobs:
           fi
       - uses: actions/download-artifact@v8
         with:
-          name: auto-grid
+          name: auto-grid-release
           path: dist
       - name: Attach installable JavaScript to the release
         run: gh release upload "$RELEASE_TAG" dist/auto-grid.js --clobber
 
   validate-hacs:
-    needs: publish
+    needs: [release-build, publish]
     if: >-
       !cancelled() &&
-      (needs.publish.result == 'success' || needs.publish.result == 'skipped')
+      (needs.publish.result == 'success' ||
+       (needs.release-build.result == 'skipped' && needs.publish.result == 'skipped'))
     runs-on: ubuntu-latest
     permissions: {}
     steps:

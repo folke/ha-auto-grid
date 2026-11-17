@@ -854,8 +854,11 @@ Merging that PR publishes the GitHub release and updates `CHANGELOG.md`, the pac
 version, and `.github/release-please-manifest.json`. The first release is `v0.1.0`.
 Before 1.0, features bump the minor version and fixes bump the patch version.
 
-CI attaches the verified build as **`auto-grid.js`** to the release. The workflow
-checks that the release tag points to the exact commit used for that build. `dist/`
+A separate release job resolves the release tag to an immutable commit, checks out
+that commit, and runs typechecks, lint, tests, and the build. It attaches the resulting
+**`auto-grid.js`** to the release, verifying that the tag still points to that commit
+before upload. Formatting checks belong to normal CI, not historical release rebuilds.
+This also handles releases published after newer commits have landed on `main`. `dist/`
 stays git-ignored: Marketplace users receive release assets, not Actions artifacts
 or a bundle committed to `main`. No npm publishing or ZIP packaging is involved.
 The release is published directly; the asset follows when its upload job finishes.
@@ -871,8 +874,9 @@ Repository setup:
 
 If an upload fails, rerun the failed jobs. Alternatively, run **CI** manually from
 `main`, setting **release_tag** to the existing tag (for example, `v0.1.0`). This
-checks out that tag, reruns validation/build, and replaces its JavaScript asset;
-it does not create another release. Leave the input empty to only run CI.
+checks out that tag, reruns typechecks/lint/tests/build without formatting checks,
+and replaces its JavaScript asset; it does not create another release. Leave the
+input empty to only run CI.
 
 HACS validation also runs after a successful upload. Before the first release asset
 exists, the normal Marketplace validation fails its repository-structure check;
