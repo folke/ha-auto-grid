@@ -3,6 +3,8 @@ name: CI
 on:
   push:
   pull_request:
+  schedule:
+    - cron: "0 0 * * *"
   workflow_dispatch:
     inputs:
       release_tag:
@@ -15,6 +17,7 @@ permissions:
 
 jobs:
   build:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     outputs:
       sha: ${{ steps.revision.outputs.sha }}
@@ -107,7 +110,16 @@ jobs:
       - name: Attach installable JavaScript to the release
         run: gh release upload "$RELEASE_TAG" dist/auto-grid.js --clobber
 
-  validate-release:
+  validate-hacs:
     needs: publish
+    if: >-
+      !cancelled() &&
+      (needs.publish.result == 'success' || needs.publish.result == 'skipped')
+    runs-on: ubuntu-latest
     permissions: {}
-    uses: ./.github/workflows/validate.yml
+    steps:
+      - name: HACS validation
+        uses: hacs/action@main
+        with:
+          category: plugin
+          comment: false
