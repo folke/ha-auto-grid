@@ -12,9 +12,28 @@ It works in Sections and other dashboard views. Generated cards can use
 
 [![Open your Home Assistant instance and open a repository in the Marketplace.](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=folke&repository=ha-auto-grid&category=plugin)
 
-Refresh the browser after registering or updating the resource. Add a **Manual** card
-and paste one of the configurations below. A focused visual editor is available for
-layout and the shared `card:` configuration; selection rules remain YAML-based.
+### Marketplace / HACS
+
+Use the badge above to add this repository as a **Dashboard** plugin and install it.
+On older Home Assistant versions, add `https://github.com/folke/ha-auto-grid` as a
+custom Dashboard repository in HACS. The repository does not need to be in the
+central catalog to install it this way.
+
+The Marketplace downloads `auto-grid.js` from the GitHub release and normally
+registers the dashboard resource automatically. For YAML-managed resources, follow
+the resource instructions shown during installation.
+
+### Manual installation
+
+1. Download **`auto-grid.js`** from the [latest release](https://github.com/folke/ha-auto-grid/releases/latest).
+   Use the attached JavaScript asset, not GitHub's source ZIP.
+2. Copy it to `<config>/www/auto-grid.js`.
+3. Add `/local/auto-grid.js?v=0.1.0` as a dashboard resource with type **JavaScript
+   module**. Change the version query when updating to avoid stale browser caches.
+
+Refresh the browser after installing or updating. Add a **Manual** card and paste
+one of the configurations below. A focused visual editor is available for layout
+and the shared `card:` configuration; selection rules remain YAML-based.
 
 ## Visual editor
 
@@ -826,6 +845,39 @@ shared automatic samples, manual entity isolation, inline selection YAML, preser
 root fields, panel/draft retention, YAML fallback, and template safety.
 The card helpers, backend, and native HA editor components are mocked: live HA
 compatibility still needs testing on your installation.
+
+### Releases
+
+Release Please runs after successful CI on `main`, using the automation GitHub App.
+It maintains a release PR from conventional commits (`feat:`, `fix:`, and so on).
+Merging that PR publishes the GitHub release and updates `CHANGELOG.md`, the package
+version, and `.github/release-please-manifest.json`. The first release is `v0.1.0`.
+Before 1.0, features bump the minor version and fixes bump the patch version.
+
+CI attaches the verified build as **`auto-grid.js`** to the release. The workflow
+checks that the release tag points to the exact commit used for that build. `dist/`
+stays git-ignored: Marketplace users receive release assets, not Actions artifacts
+or a bundle committed to `main`. No npm publishing or ZIP packaging is involved.
+The release is published directly; the asset follows when its upload job finishes.
+
+Repository setup:
+
+- Install the automation GitHub App for this repository with **Contents**, **Issues**,
+  and **Pull requests** read/write access.
+- Set the repository variable `AUTOMATION_APP_ID` and Actions secret
+  `AUTOMATION_APP_PRIVATE_KEY`. Tokens are scoped to this repository.
+- Enable issues and set a repository description and topics.
+- Add real screenshots to this README before requesting inclusion in the catalog.
+
+If an upload fails, rerun the failed jobs. Alternatively, run **CI** manually from
+`main`, setting **release_tag** to the existing tag (for example, `v0.1.0`). This
+checks out that tag, reruns validation/build, and replaces its JavaScript asset;
+it does not create another release. Leave the input empty to only run CI.
+
+HACS validation also runs after a successful upload. Before the first release asset
+exists, the normal Marketplace validation fails its repository-structure check;
+a local build cannot fix that remote check. Do not require that check for merging
+the bootstrap release. The screenshot and catalog submission remain separate steps.
 
 ### Local deployment
 
