@@ -104,6 +104,10 @@ export class AutoGrid extends LitElement {
     super.disconnectedCallback()
   }
 
+  get connectedWhileHidden(): boolean {
+    return this.hideEmpty
+  }
+
   private get hideEmpty(): boolean {
     return (
       this.config?.show_empty === false &&
@@ -182,8 +186,19 @@ export class AutoGrid extends LitElement {
 
   private gridChanged(): void {
     this.syncHeadings()
-    // Don't set `hidden`: HA removes hidden cards from the DOM, preventing query recovery.
-    this.toggleAttribute("empty", this.hideEmpty)
+    const empty = this.hideEmpty
+    const visibilityChanged = this.hidden !== empty
+    this.hidden = empty
+    this.toggleAttribute("empty", empty)
+    // HA collapses its layout wrapper; connectedWhileHidden keeps empty queries alive.
+    if (visibilityChanged)
+      this.dispatchEvent(
+        new CustomEvent("card-visibility-changed", {
+          bubbles: true,
+          composed: true,
+          detail: { value: !empty },
+        })
+      )
     this.requestUpdate()
     const update = ++this.sizeUpdate
     void this.updateComplete.then(async () => {

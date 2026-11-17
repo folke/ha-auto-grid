@@ -97,7 +97,10 @@
             (await grid.getCardSize()) === 0,
           "show_empty false suppresses initial loading content and reserved height"
         )
-        assert(!grid.hidden, "loading grids stay connected and subscribed")
+        assert(
+          grid.hidden && grid.connectedWhileHidden && grid.isConnected,
+          "loading grids report native visibility while staying connected and subscribed"
+        )
         grid.preview = true
         await tick()
         assert(
@@ -288,7 +291,10 @@
           !grid.shadowRoot.querySelector(".card-header") && (await grid.getCardSize()) === 0,
           "hidden empty grid has no title or reserved height"
         )
-        assert(!grid.hidden && stops === 1, "empty grids remain subscribed so they can recover")
+        assert(
+          grid.hidden && grid.connectedWhileHidden && grid.isConnected && stops === 1,
+          "empty grids remain subscribed so they can recover"
+        )
         grid.preview = true
         await tick()
         assert(getComputedStyle(grid).display !== "none", "empty grid remains editable in preview")
@@ -920,6 +926,149 @@
           "heading helper errors can retry without reopening the entity query"
         )
         brokenHeading.remove()
+
+        // Mirror hui-card's visibility contract and Sections' hidden grid-item wrapper.
+        const nativeSection = document.createElement("div")
+        nativeSection.style.cssText = "display:grid;gap:16px;width:300px"
+        const beforeEmpty = document.createElement("div")
+        const afterEmpty = document.createElement("div")
+        beforeEmpty.style.height = afterEmpty.style.height = "20px"
+        nativeSection.append(beforeEmpty)
+        const wrapped = []
+        const wrapperRequests = []
+        const wrapperConnection = {
+          subscribeMessage(callback, request) {
+            const entry = { callback, request, closed: false }
+            wrapperRequests.push(entry)
+            return Promise.resolve(() => {
+              entry.closed = true
+            })
+          },
+        }
+        for (let i = 0; i < 2; i++) {
+          const slot = document.createElement("div")
+          const wrapper = document.createElement("div")
+          const card = document.createElement("auto-grid")
+          let visibilityEvents = 0
+          let conditionsVisible = true
+          const updateVisibility = () => {
+            wrapper.hidden = card.hidden || !conditionsVisible
+            wrapper.style.display = wrapper.hidden ? "none" : ""
+            slot.style.display = wrapper.hidden ? "none" : ""
+            if (card.connectedWhileHidden === true) {
+              if (!card.parentElement) wrapper.append(card)
+            } else if (wrapper.hidden && card.parentElement) card.remove()
+            else if (!wrapper.hidden && !card.parentElement) wrapper.append(card)
+          }
+          card.addEventListener("card-visibility-changed", (event) => {
+            event.stopPropagation()
+            visibilityEvents++
+            assert(
+              event.detail.value === !card.hidden,
+              "visibility events match native hidden state"
+            )
+            updateVisibility()
+          })
+          card.setConfig({ include: { entity_id: `light.wrapped_${i}` }, sort: [] })
+          card.hass = { connection: wrapperConnection, states: {} }
+          updateVisibility()
+          slot.append(wrapper)
+          nativeSection.append(slot)
+          wrapped.push({
+            card,
+            slot,
+            wrapper,
+            events: () => visibilityEvents,
+            setConditionalVisibility(visible) {
+              conditionsVisible = visible
+              updateVisibility()
+            },
+          })
+        }
+        nativeSection.append(afterEmpty)
+        document.body.append(nativeSection)
+        await tick()
+        const sectionGap = () =>
+          afterEmpty.getBoundingClientRect().top - beforeEmpty.getBoundingClientRect().bottom
+        assert(sectionGap() === 16, "two empty Auto Grids add no Sections grid gaps")
+        assert(
+          wrapped.every(({ card }) => card.isConnected),
+          "HA keeps empty cards mounted"
+        )
+        assert(
+          wrapperRequests.length === 2 && wrapperRequests.every(({ closed }) => !closed),
+          "empty wrappers retain their queries"
+        )
+        wrapperRequests[0].callback({ result: [{ entity: "light.wrapped_0", group: 0 }] })
+        await tick()
+        assert(
+          !wrapped[0].card.hidden && !wrapped[0].wrapper.hidden && wrapped[1].wrapper.hidden,
+          "a matching card reveals its native layout wrapper"
+        )
+        assert(
+          sectionGap() > 16 && wrapperRequests.length === 2,
+          "population restores layout without reopening queries"
+        )
+        wrapperRequests[0].callback({ result: [] })
+        await tick()
+        assert(
+          sectionGap() === 16 && wrapped[0].card.isConnected,
+          "returning to empty removes the wrapper gap without disconnecting"
+        )
+        const emptyEvents = wrapped[0].events()
+        wrapped[0].card.hass = { connection: wrapperConnection, states: { changed: true } }
+        await tick()
+        assert(
+          wrapped[0].events() === emptyEvents,
+          "ordinary hass updates emit no visibility events"
+        )
+        wrapped[0].card.preview = true
+        await tick()
+        assert(
+          !wrapped[0].card.hidden && !wrapped[0].wrapper.hidden,
+          "empty previews remain editable in a native wrapper"
+        )
+        wrapped[0].card.preview = false
+        await tick()
+        assert(sectionGap() === 16, "leaving preview collapses the wrapper again")
+        wrapped[0].card.setConfig({
+          include: { entity_id: "light.wrapped_0" },
+          sort: [],
+          show_empty: true,
+        })
+        await tick()
+        assert(
+          !wrapped[0].card.hidden && !wrapped[0].wrapper.hidden,
+          "show_empty retains the native layout slot"
+        )
+        assert(
+          !wrapped[0].card.connectedWhileHidden,
+          "visible cards retain HA's normal disconnect-on-hide behavior"
+        )
+        wrapperRequests[1].callback({ error: { message: "wrapped query failed" } })
+        await tick()
+        assert(
+          !wrapped[1].wrapper.hidden && wrapped[1].card.shadowRoot.querySelector('[role="alert"]'),
+          "query errors reveal the native wrapper"
+        )
+        wrapped[0].setConditionalVisibility(false)
+        await tick()
+        assert(
+          !wrapped[0].card.isConnected && wrapperRequests[0].closed,
+          "conditional visibility still disconnects a card that is not self-hidden"
+        )
+        wrapped[0].setConditionalVisibility(true)
+        await tick()
+        assert(
+          wrapped[0].card.isConnected && wrapperRequests.length === 3,
+          "conditional visibility can reconnect normally"
+        )
+        nativeSection.remove()
+        await tick()
+        assert(
+          wrapperRequests.every(({ closed }) => closed),
+          "removing the section closes retained queries"
+        )
 
         observer.disconnect()
         grid.remove()

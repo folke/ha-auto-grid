@@ -198,8 +198,9 @@ Nested options replace inherited values rather than merging recursively.
   scoped selection or `limit` to avoid crowded rows.
 - Use an area, label, integration, explicit entity list, or domain/type to scope
   queries. Broad queries can be rate-limited by Home Assistant.
-- `show_empty: false` hides loading/empty grids. An empty grid stays subscribed so
-  it can populate again; query errors show a Retry button.
+- `show_empty: false` hides loading/empty grids, including their Sections layout
+  gaps. An empty grid stays subscribed so it can populate again; query errors show
+  a Retry button.
 - This is an equal-column grid, not the full Sections layout engine. Per-card spans
   and minimum-width-based wrapping are not supported.
 

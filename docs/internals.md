@@ -40,14 +40,19 @@ YAML contract and examples, see [Configuration](configuration.md).
 - Stale async card creation cannot overwrite newer results or mount after disconnection.
 - Disconnecting releases the subscription; reconnecting obtains fresh results and
   reuses retained cards. The last active consumer closes a shared subscription.
-- Native HA conditional visibility disconnects cards by default, releasing the
-  subscription. Wrappers that only apply CSS hiding may keep it connected and
-  subscribed. There is no general active-view visibility observer yet.
+- Native HA conditional visibility disconnects cards that are not self-hidden,
+  releasing their subscriptions. Empty/loading grids opt into staying connected as
+  described below. Wrappers that only apply CSS hiding may keep cards subscribed.
+  There is no general active-view visibility observer yet.
 - Below-the-fold cards and background browser tabs remain subscribed while connected.
 - With `show_empty: false`, initial loading and empty results render no placeholder,
   title, or reserved height. Cached cards remain visible while refreshing. An empty
-  grid stays connected and subscribed so it can populate again. Loading/empty
-  placeholders remain available with `show_empty: true` or in HA's editor preview.
+  grid reports `hidden` and emits `card-visibility-changed` so HA also hides its layout
+  wrapper, removing Sections grid gaps. While self-hidden, `connectedWhileHidden`
+  returns true so `hui-card` keeps it connected and subscribed for query recovery.
+  Otherwise that hook is false, preserving normal conditional-visibility cleanup.
+  Loading/empty placeholders remain available with `show_empty: true` or in HA's
+  editor preview.
 - Masonry layouts receive HA's `card-updated` event only when the reported card size
   changes. Initially hidden grids can be redistributed after loading, without a
   loading placeholder or relayout on ordinary `hass` updates.
