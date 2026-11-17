@@ -1,18 +1,27 @@
+import {
+  testConnection,
+  testCard,
+  type Callback,
+  type Request,
+  type Message,
+  type Dispose,
+} from "./helpers.ts"
+import type { RegistryKind } from "../src/types.ts"
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import { spawnSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
-import { normalizeConfig } from "../src/query.ts"
+import { normalizeConfig, rendered } from "./helpers.ts"
 import { subscribeTemplate } from "../src/subscriptions.ts"
 import { watchRegistries } from "../src/registries.ts"
 import { GridController } from "../src/grid.ts"
 
 const tick = () => new Promise((resolve) => setImmediate(resolve))
 function fixture() {
-  const requests = []
+  const requests: Request[] = []
   let manifestCalls = 0
-  const connection = {
-    subscribeMessage(callback, request) {
+  const connection = testConnection({
+    subscribeMessage(callback: Callback, request: Message) {
       const entry = { callback, request, closed: false }
       requests.push(entry)
       return Promise.resolve(() => {
@@ -23,16 +32,16 @@ function fixture() {
       manifestCalls++
       return [{ domain: "mqtt", name: `MQTT ${manifestCalls}` }]
     },
-  }
+  })
   const templates = () => requests.filter(({ request }) => request.type === "render_template")
-  const registry = (kind) =>
+  const registry = (kind: RegistryKind) =>
     requests.findLast(
       ({ request, closed }) =>
         !closed &&
         (kind === "integration"
           ? request.type === "config_entries/subscribe"
           : request.event_type === `${kind}_registry_updated`)
-    )
+    )!
   return {
     connection,
     requests,
@@ -44,14 +53,14 @@ function fixture() {
   }
 }
 const consumer = () => {
-  const values = [],
-    errors = []
+  const values: unknown[] = [],
+    errors: Error[] = []
   let refreshes = 0
   return {
     values,
     errors,
-    result: (value) => values.push(value),
-    error: (error) => errors.push(error),
+    result: (value: unknown) => values.push(value),
+    error: (error: Error) => errors.push(error),
     refresh: () => refreshes++,
     get refreshes() {
       return refreshes
@@ -60,7 +69,8 @@ const consumer = () => {
 }
 
 test("query dependencies include metadata from filters, sorting, grouping, and explicit templates", () => {
-  const deps = (extra) => normalizeConfig({ include: {}, sort: [], ...extra }).query.registries
+  const deps = (extra: Record<string, unknown>) =>
+    normalizeConfig({ include: {}, sort: [], ...extra }).query.registries
   assert.deepEqual(deps({ include: { type: "light", state: true } }), [])
   assert.deepEqual(deps({ sort: "name" }), ["entity", "device"])
   assert.deepEqual(deps({ include: { area: "office" } }), ["entity", "device", "area"])
@@ -93,7 +103,7 @@ test("shared queries coalesce registry bursts and reject replies from invalidate
   const f = fixture(),
     a = consumer(),
     b = consumer()
-  const options = { registries: ["entity", "area"] }
+  const options: { registries: RegistryKind[] } = { registries: ["entity", "area"] }
   const closeA = subscribeTemplate(f.connection, "query", a, undefined, options)
   const closeB = subscribeTemplate(f.connection, "query", b, undefined, options)
   assert.equal(f.requests.length, 3)
@@ -180,11 +190,13 @@ test("a new registry edit invalidates an in-flight replacement and closing cance
 test("pending setup is disposed even if invalidated or disconnected before its unsubscribe arrives", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] })
   const f = fixture(),
-    pending = []
+    pending: { callback: Callback; resolve: (dispose: Dispose) => void }[] = []
   const original = f.connection.subscribeMessage
   f.connection.subscribeMessage = (callback, request) => {
     if (request.type !== "render_template") return original(callback, request)
-    return new Promise((resolve) => pending.push({ callback, resolve }))
+    return new Promise<Dispose>((resolve) =>
+      pending.push({ callback: callback as Callback, resolve })
+    )
   }
   const close = subscribeTemplate(f.connection, "query", consumer(), undefined, {
     registries: ["entity"],
@@ -193,19 +205,25 @@ test("pending setup is disposed even if invalidated or disconnected before its u
   t.mock.timers.tick(100)
   close()
   let stops = 0
-  pending.forEach(({ resolve }) => resolve(() => stops++))
+  pending.forEach(({ resolve }) =>
+    resolve(() => {
+      stops++
+    })
+  )
   await tick()
   assert.equal(stops, 2)
   const late = fixture()
-  let resolveRegistry,
+  let resolveRegistry!: (dispose: Dispose) => void,
     registryStops = 0
   late.connection.subscribeMessage = () =>
-    new Promise((resolve) => {
+    new Promise<Dispose>((resolve) => {
       resolveRegistry = resolve
     })
   const stop = watchRegistries(late.connection, ["area"], () => assert.fail("closed watcher fired"))
   stop()
-  resolveRegistry(() => registryStops++)
+  resolveRegistry(() => {
+    registryStops++
+  })
   await tick()
   assert.equal(registryStops, 1)
 })
@@ -221,11 +239,19 @@ test("config-entry changes refresh integration names; initial snapshots do not l
   f.registry("integration").callback([{ type: null, entry: { domain: "mqtt" } }])
   await tick()
   assert.equal(f.templates().length, 1)
-  assert.equal(f.templates()[0].request.variables.ag_integration_names.mqtt, "MQTT 1")
+  assert.equal(
+    (f.templates()[0].request.variables as { ag_integration_names: Record<string, string> })
+      .ag_integration_names.mqtt,
+    "MQTT 1"
+  )
   f.registry("integration").callback([{ type: "updated", entry: { domain: "mqtt" } }])
   t.mock.timers.tick(100)
   await tick()
-  assert.equal(f.templates()[1].request.variables.ag_integration_names.mqtt, "MQTT 2")
+  assert.equal(
+    (f.templates()[1].request.variables as { ag_integration_names: Record<string, string> })
+      .ag_integration_names.mqtt,
+    "MQTT 2"
+  )
   f.registry("integration").callback([{ type: null, entry: { domain: "mqtt" } }])
   t.mock.timers.tick(100)
   await tick()
@@ -247,7 +273,7 @@ test("an empty scoped grid populates on registry changes and retained cards neve
     made = []
   const grid = new GridController(
     async (config) => {
-      const card = { config }
+      const card = testCard(config)
       made.push(card)
       return card
     },
@@ -308,7 +334,7 @@ test(
       }
     )
     assert.equal(output.status, 0, output.stderr)
-    const [actual] = JSON.parse(output.stdout)
+    const [actual] = rendered(output.stdout)
     assert.deepEqual(actual.result, [{ entity: "light.a", group: 0 }])
     assert.deepEqual(actual.state_reads, [])
     assert.equal(actual.lifecycle_reads, 1)
@@ -325,12 +351,16 @@ test("integration load events refresh manifest names even without config entries
   await tick()
   assert.equal(f.manifestCalls, 1)
   f.requests
-    .find(({ request }) => request.event_type === "component_loaded")
+    .find(({ request }) => request.event_type === "component_loaded")!
     .callback({ data: { component: "yaml_template" } })
   t.mock.timers.tick(100)
   await tick()
   assert.equal(f.manifestCalls, 2)
-  assert.equal(f.templates()[1].request.variables.ag_integration_names.mqtt, "MQTT 2")
+  assert.equal(
+    (f.templates()[1].request.variables as { ag_integration_names: Record<string, string> })
+      .ag_integration_names.mqtt,
+    "MQTT 2"
+  )
   close()
   await tick()
   assert.ok(f.requests.every(({ closed }) => closed))

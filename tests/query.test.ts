@@ -1,9 +1,11 @@
+import type { SortField } from "../src/types.ts"
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import { fieldValue, normalizeMatches } from "../src/query.ts"
-import { normalizeConfig } from "../src/query.ts"
+import { normalizeConfig } from "./helpers.ts"
 
-const query = (include, extra = {}) => normalizeConfig({ include, ...extra }).query.template
+const query = (include: unknown, extra: Record<string, unknown> = {}) =>
+  normalizeConfig({ include, ...extra }).query.template
 
 test("defaults to two columns of tiles and name sorting without mutating input", () => {
   const input = { include: { area: "pool", domain: "light" }, card: { name: { type: "entity" } } }
@@ -58,7 +60,7 @@ test("area queries restrict candidates and hoist shared registry helpers", () =>
     ],
     { exclude: { area: "pool", state: "unavailable" } }
   )
-  assert.equal(template.match(/area_entities\("pool"\)/g).length, 1)
+  assert.equal(template.match(/area_entities\("pool"\)/g)!.length, 1)
   assert.match(template, /for entity in \(ag_members_0\)/)
   assert.doesNotMatch(template, /states \| map/)
 })
@@ -136,7 +138,7 @@ test("sort strings and mixed lists compile identically to their expanded forms",
 })
 
 test("fieldValue supplies every sortable filter field and optional by defaults to name", () => {
-  const fields = [
+  const fields: SortField[] = [
     "area",
     "floor",
     "device",
@@ -171,14 +173,14 @@ test("integration candidates and predicates share one hoisted membership lookup"
     { integration: "mqtt" },
     { exclude: { integration: "mqtt", hidden: true } }
   )
-  assert.equal(template.match(/integration_entities\("mqtt"\)/g).length, 1)
+  assert.equal(template.match(/integration_entities\("mqtt"\)/g)!.length, 1)
   assert.doesNotMatch(template, /states \| map/)
   assert.match(template, /for entity in \(ag_members_0\)/)
   assert.doesNotMatch(query({ not: { integration: "mqtt" } }), /for entity in \(ag_members_0\)/)
 })
 
 test("timestamp rules use the same Unix timestamp expressions as sorting", () => {
-  for (const field of ["last_changed", "last_updated"]) {
+  for (const field of ["last_changed", "last_updated"] as const) {
     assert.ok(query({ [field]: "> 1767225600" }).includes(fieldValue(field, 0)))
     assert.throws(() => normalizeConfig({ include: { [field]: {} } }))
   }

@@ -1,8 +1,10 @@
+import type { QuerySection } from "../src/types.ts"
 import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
 import { test } from "node:test"
-import { normalizeConfig, normalizeResult } from "../src/query.ts"
+import { normalizeResult } from "../src/query.ts"
+import { normalizeConfig, rendered } from "./helpers.ts"
 
 const python = spawnSync("python3", ["-c", "import jinja2"], { encoding: "utf8" })
 const selection = [
@@ -55,7 +57,7 @@ test("grouped results validate types and retain number/string/boolean identities
     matches: [{ entity: `light.item_${i}`, group: 0 }],
   }))
   const result = normalizeResult(sections, config)
-  assert.equal(new Set(result.sections.map(({ key }) => key)).size, 6)
+  assert.equal(new Set(result.sections!.map(({ key }) => key)).size, 6)
   assert.equal(result.matches.length, 6)
   for (const invalid of [
     null,
@@ -75,7 +77,14 @@ test(
     skip: python.status !== 0 ? "Optional check requires Python 3 with jinja2 installed" : false,
   },
   () => {
-    const payload = {
+    const payload: {
+      states: Record<string, { name: string; state: string; attributes?: Record<string, unknown> }>
+      registry: Record<string, unknown>
+      devices: Record<string, unknown>
+      areas: Record<string, unknown>
+      labels: Record<string, unknown>
+      config_entries: Record<string, unknown>
+    } = {
       states: {
         "light.a": { state: "on", name: "A", attributes: { bucket: 1 } },
         "sensor.b": { state: "on", name: "B", attributes: { bucket: 1.0 } },
@@ -113,12 +122,16 @@ test(
     const firstObject = { x: 1, y: [true, "1"] }
     const secondObject = { x: 1, y: [1, "1"] }
     const thirdObject = { x: 1, y: [true, 1] }
-    payload.states["light.a"].attributes.complex = firstObject
-    payload.states["sensor.b"].attributes.complex = { y: [true, "1"], x: 1 }
-    payload.states["light.c"].attributes.complex = secondObject
-    payload.states["sensor.d"].attributes.complex = thirdObject
-    const section = (value, title, ...entities) => ({ value, title, entities })
-    const cases = [
+    payload.states["light.a"].attributes!.complex = firstObject
+    payload.states["sensor.b"].attributes!.complex = { y: [true, "1"], x: 1 }
+    payload.states["light.c"].attributes!.complex = secondObject
+    payload.states["sensor.d"].attributes!.complex = thirdObject
+    const section = (value: unknown, title: string, ...entities: string[]) => ({
+      value,
+      title,
+      entities,
+    })
+    const cases: [Record<string, unknown>, ReturnType<typeof section>[]][] = [
       [
         { include: selection, group: true },
         [
@@ -285,7 +298,7 @@ test(
       }
     )
     assert.equal(output.status, 0, output.stderr)
-    JSON.parse(output.stdout).forEach((actual, i) => {
+    rendered<QuerySection[]>(output.stdout).forEach((actual, i) => {
       assert.deepEqual(
         actual.result.map(({ value, title, matches }) => ({
           value,

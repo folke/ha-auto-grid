@@ -1,3 +1,4 @@
+import type { AutoGridConfig } from "../src/types.ts"
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import {
@@ -20,14 +21,14 @@ const config = {
   card: { name: { type: "entity" }, primary: "{{ entity_name(entity) }}" },
   styler: { preset: "compact" },
   visibility: [{ condition: "user", users: ["abc"] }],
-}
+} satisfies AutoGridConfig
 
 test("editor card values inject type and temporary entity without mutating config", () => {
   const before = structuredClone(config)
   const value = cardEditorValue(config, "light.preview")
   assert.equal(value.type, "tile")
   assert.equal(value.entity, "light.preview")
-  const name = value.name
+  const name = value.name as { type: string }
   name.type = "device"
   assert.deepEqual(config, before)
   assert.equal(updateCard(config, cardEditorValue(config, "light.preview"), true), config)
@@ -52,7 +53,7 @@ test("visual updates change only the global card and never save preview entities
   assert.equal(next.card.icon, "mdi:lightbulb")
   assert.equal(next.card.entity, undefined)
   assert.equal(next.card.primary, "{{ entity_name(entity) }}")
-  for (const key of ["include", "exclude", "group", "sort", "styler", "visibility"])
+  for (const key of ["include", "exclude", "group", "sort", "styler", "visibility"] as const)
     assert.deepEqual(next[key], config[key])
   assert.ok(Array.isArray(next.include) && next.include[0].card)
   next.include[0].card.icon = "changed"
@@ -111,11 +112,11 @@ test("selection YAML owns only query fields, preserving card/layout/extra root o
     title: "Office",
     columns: "auto",
     limit: 5,
-  }
+  } satisfies AutoGridConfig
   const data = selectionData(original)
   assert.deepEqual(Object.keys(data), ["include", "exclude", "group", "sort", "limit"])
   assert.equal(updateSelection(original, data), original)
-  const includes = data.include
+  const includes = data.include as typeof config.include
   includes[0].card.icon = "changed"
   assert.equal(original.include[0].card.icon, "mdi:lamp")
   const next = updateSelection(original, { include: config.include, sort: "name", limit: 2 })
@@ -124,7 +125,7 @@ test("selection YAML owns only query fields, preserving card/layout/extra root o
   assert.equal(next.limit, 2)
   assert.equal("exclude" in next, false)
   assert.equal("group" in next, false)
-  for (const key of ["card", "title", "columns", "styler", "visibility"])
+  for (const key of ["card", "title", "columns", "styler", "visibility"] as const)
     assert.deepEqual(next[key], original[key])
   const noLimit = updateSelection(next, { include: config.include })
   assert.equal("limit" in noLimit, false)

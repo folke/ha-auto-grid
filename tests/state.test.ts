@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
 import { test } from "node:test"
-import { normalizeConfig } from "../src/query.ts"
+import { normalizeConfig, rendered } from "./helpers.ts"
 
 const python = spawnSync("python3", ["-c", "import jinja2"], { encoding: "utf8" })
 test(
@@ -18,7 +18,7 @@ test(
       "light.d": { name: "D", state: "unavailable", attributes: { flag: "off" } },
       "cover.e": { name: "E", state: "open", attributes: { flag: true } },
     }
-    const cases = [
+    const cases: [Record<string, unknown>, string[]][] = [
       [{ include: { state: true } }, ["light.a"]],
       [{ include: { state: false } }, ["light.b"]],
       [{ include: { state: [true, false, "unavailable"] } }, ["light.a", "light.b", "light.d"]],
@@ -43,7 +43,7 @@ test(
       }
     )
     assert.equal(output.status, 0, output.stderr)
-    JSON.parse(output.stdout).forEach((actual, i) =>
+    rendered(output.stdout).forEach((actual, i) =>
       assert.deepEqual(
         actual.result.map(({ entity }) => entity),
         cases[i][1],

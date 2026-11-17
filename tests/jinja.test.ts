@@ -2,9 +2,9 @@ import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
 import { test } from "node:test"
-import { normalizeConfig } from "../src/query.ts"
+import { normalizeConfig, rendered } from "./helpers.ts"
 
-const compileFilter = (include, sort, limit) =>
+const compileFilter = (include: unknown, sort?: unknown, limit?: number) =>
   normalizeConfig({ include, sort: sort ?? [], limit }).query.template
 
 const python = spawnSync("python3", ["-c", "import jinja2"], { encoding: "utf8" })
@@ -14,7 +14,10 @@ test(
     skip: python.status !== 0 ? "Optional check requires Python 3 with jinja2 installed" : false,
   },
   () => {
-    const states = {
+    const states: Record<
+      string,
+      { state: string; name?: string; attributes?: Record<string, unknown> }
+    > = {
       "light.pool": { state: "on", name: "Pool" },
       "light.hall": { state: "off", name: "Hall" },
       "light.deck": { state: "on", name: "Deck" },
@@ -28,7 +31,7 @@ test(
       "label:outside": ["light.deck"],
       "floor:ground": ["light.hall", "light.pool"],
     }
-    const cases = [
+    const cases: [unknown, unknown, number | undefined, string[]][] = [
       [{ area: "pool", domain: "light" }, { by: "name" }, undefined, ["light.deck", "light.pool"]],
       [
         { area: "pool", domain: "light", state: "on" },
@@ -128,7 +131,7 @@ test(
       }
     )
     assert.equal(result.status, 0, result.stderr)
-    JSON.parse(result.stdout).forEach((actual, index) => {
+    rendered(result.stdout).forEach((actual, index) => {
       assert.deepEqual(
         actual.result,
         cases[index][3].map((entity) => ({ entity, group: 0 })),
@@ -146,16 +149,19 @@ test(
     skip: python.status !== 0 ? "Optional check requires Python 3 with jinja2 installed" : false,
   },
   () => {
-    const states = {
+    const states: Record<
+      string,
+      { state: string; name?: string; attributes?: Record<string, unknown> }
+    > = {
       "light.z": { state: "on", name: "Same", attributes: { device_class: "light" } },
       "light.a": { state: "off", name: "same", attributes: { device_class: "light" } },
       "sensor.z": { state: "12", name: "A", attributes: { device_class: "battery" } },
       "sensor.a": { state: "3", name: "Z", attributes: { device_class: "temperature" } },
       "sensor.missing": { state: "unavailable", name: "0" },
     }
-    const row = (entity, group = 0) => ({ entity, group })
+    const row = (entity: string, group = 0) => ({ entity, group })
     const groups = [{ domain: "light" }, { domain: "sensor" }]
-    const cases = [
+    const cases: [string, Record<string, unknown>, { entity: string; group: number }[]][] = [
       [
         "explicit group/name, with entity-ID fallback",
         { include: groups },
@@ -311,10 +317,10 @@ test(
       { input: JSON.stringify(payload), encoding: "utf8" }
     )
     assert.equal(output.status, 0, output.stderr)
-    const results = JSON.parse(output.stdout)
+    const results = rendered(output.stdout)
     cases.forEach(([name, , expected], i) => assert.deepEqual(results[i].result, expected, name))
     assert.deepEqual(
-      results.at(-1).result,
+      results.at(-1)!.result,
       Object.keys(many).map((entity, group) => row(entity, group)),
       "include sorting is numeric, not lexicographic"
     )
@@ -327,7 +333,10 @@ test(
     skip: python.status !== 0 ? "Optional check requires Python 3 with jinja2 installed" : false,
   },
   () => {
-    const states = {
+    const states: Record<
+      string,
+      { state: string; name?: string; attributes?: Record<string, unknown> }
+    > = {
       "light.user_hidden": { state: "on" },
       "light.integration_hidden": { state: "off" },
       "light.visible": { state: "on" },
@@ -340,7 +349,7 @@ test(
     }
     const hidden = ["light.user_hidden", "light.integration_hidden"]
     const visible = ["light.visible", "light.unregistered"]
-    const cases = [
+    const cases: [Record<string, unknown>, string[]][] = [
       [{ include: { domain: "light", hidden: true } }, hidden],
       [{ include: { domain: "light", hidden: false } }, visible],
       [{ include: { domain: "light" }, exclude: { hidden: true } }, visible],
@@ -371,7 +380,7 @@ test(
       }
     )
     assert.equal(output.status, 0, output.stderr)
-    JSON.parse(output.stdout).forEach((actual, i) => {
+    rendered(output.stdout).forEach((actual, i) => {
       assert.deepEqual(
         actual.result.map(({ entity }) => entity),
         cases[i][1],
@@ -387,7 +396,10 @@ test(
     skip: python.status !== 0 ? "Optional check requires Python 3 with jinja2 installed" : false,
   },
   () => {
-    const states = {
+    const states: Record<
+      string,
+      { state: string; name?: string; attributes?: Record<string, unknown> }
+    > = {
       "sensor.temperature": { state: "20", name: "AAA Pool controller Temperature" },
       "sensor.energy": { state: "12", name: "ZZZ Pool controller Energy" },
       "sensor.main": { state: "on", name: "000 Legacy pump" },
@@ -408,7 +420,7 @@ test(
       "sensor.main",
       "sensor.temperature",
     ]
-    const cases = [
+    const cases: [Record<string, unknown>, string[]][] = [
       [{ include: { domain: "sensor", name: "Temperature" } }, ["sensor.temperature"]],
       [{ include: { domain: "sensor", name: "AAA Pool controller Temperature" } }, []],
       [{ include: { domain: "sensor", name: "Pump" } }, ["sensor.main"]],
@@ -457,7 +469,7 @@ test(
       }
     )
     assert.equal(output.status, 0, output.stderr)
-    JSON.parse(output.stdout).forEach((actual, i) => {
+    rendered(output.stdout).forEach((actual, i) => {
       assert.deepEqual(
         actual.result.map(({ entity }) => entity),
         cases[i][1],
@@ -474,7 +486,10 @@ test(
   },
   () => {
     const odd = "x') }} {{ boom"
-    const states = {
+    const states: Record<
+      string,
+      { state: string; name?: string; attributes?: Record<string, unknown> }
+    > = {
       "sensor.a": {
         state: "on",
         name: "A",
@@ -510,7 +525,7 @@ test(
       "sensor.c": { hidden_by: "integration", entity_name: "C" },
     }
     const all = Object.keys(states)
-    const cases = [
+    const cases: [Record<string, unknown>, string[]][] = [
       [
         { include: { domain: "sensor", not: [{ hidden: true }, { state: "unavailable" }] } },
         ["sensor.b", "sensor.d"],
@@ -582,7 +597,7 @@ test(
       }
     )
     assert.equal(output.status, 0, output.stderr)
-    JSON.parse(output.stdout).forEach((actual, i) => {
+    rendered(output.stdout).forEach((actual, i) => {
       assert.deepEqual(
         actual.result.map(({ entity }) => entity),
         cases[i][1],

@@ -1,16 +1,19 @@
+import type { QuerySection } from "../src/types.ts"
 import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
 import { test } from "node:test"
-import { fieldTitle, fieldValue, normalizeConfig } from "../src/query.ts"
+import { fieldTitle, fieldValue } from "../src/query.ts"
+import { normalizeConfig, rendered } from "./helpers.ts"
 
-const query = (include, extra = {}) => normalizeConfig({ include, ...extra }).query.template
+const query = (include: unknown, extra: Record<string, unknown> = {}) =>
+  normalizeConfig({ include, ...extra }).query.template
 
 test("entity type syntax is validated and narrows candidates to unique domains", () => {
   const template = query({
     type: ["sensor/battery", "sensor/temperature", "binary_sensor/battery"],
   })
-  assert.equal(template.match(/states.sensor \| map/g).length, 1)
+  assert.equal(template.match(/states.sensor \| map/g)!.length, 1)
   assert.match(template, /states.binary_sensor \| map/)
   assert.doesNotMatch(template, /states \| map/)
   assert.doesNotMatch(query({ all: [{ type: "sensor/battery" }] }), /states \| map/)
@@ -65,7 +68,7 @@ test(
     const all = Object.keys(states),
       sensors = all.filter((id) => id.startsWith("sensor."))
     const selection = { type: ["light", "sensor", "binary_sensor"] }
-    const cases = [
+    const cases: [Record<string, unknown>, string[]][] = [
       [{ include: { type: "sensor" } }, sensors],
       [{ include: { type: "sensor/battery" } }, ["sensor.battery"]],
       [
@@ -101,8 +104,12 @@ test(
         ],
       ],
     ]
-    const section = (value, title, entities) => ({ value, title, entities })
-    const grouped = [
+    const section = (value: unknown, title: string, entities: string[]) => ({
+      value,
+      title,
+      entities,
+    })
+    const grouped: [Record<string, unknown>, ReturnType<typeof section>[]][] = [
       [
         { include: selection, group: "type" },
         [
@@ -159,7 +166,8 @@ test(
       }
     )
     assert.equal(output.status, 0, output.stderr)
-    const results = JSON.parse(output.stdout)
+    const results = rendered(output.stdout)
+    const groupResults = rendered<QuerySection[]>(output.stdout)
     cases.forEach(([config, expected], i) =>
       assert.deepEqual(
         results[i].result.map(({ entity }) => entity),
@@ -169,7 +177,7 @@ test(
     )
     grouped.forEach(([config, expected], i) =>
       assert.deepEqual(
-        results[cases.length + i].result.map(({ value, title, matches }) => ({
+        groupResults[cases.length + i].result.map(({ value, title, matches }) => ({
           value,
           title,
           entities: matches.map(({ entity }) => entity),
@@ -201,7 +209,7 @@ test(
       },
     }
     const include = { entity_id: Object.keys(states) }
-    const cases = [
+    const cases: [Record<string, unknown>, [string, string][]][] = [
       [
         { by: "domain" },
         [
@@ -245,13 +253,13 @@ test(
       }
     )
     assert.equal(output.status, 0, output.stderr)
-    JSON.parse(output.stdout).forEach((actual, i) =>
+    rendered<QuerySection[]>(output.stdout).forEach((actual, i) =>
       assert.deepEqual(
         actual.result.map(({ value, title }) => [value, title]),
         cases[i][1]
       )
     )
-    for (const field of ["area", "floor", "device", "label", "name", "group"]) {
+    for (const field of ["area", "floor", "device", "label", "name", "group"] as const) {
       assert.equal(fieldTitle(field), "(group if group is not none else '')")
     }
   }

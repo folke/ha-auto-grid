@@ -2,9 +2,9 @@ import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
 import { test } from "node:test"
-import { normalizeConfig } from "../src/query.ts"
+import { normalizeConfig, rendered } from "./helpers.ts"
 
-const query = (include) => normalizeConfig({ include }).query.template
+const query = (include: unknown) => normalizeConfig({ include }).query.template
 
 test("device patterns check IDs and effective names without unsafe device candidate narrowing", () => {
   const include = {
@@ -65,7 +65,7 @@ test(
       weird: { name: odd },
     }
     const trackers = Object.keys(states).filter((id) => id.startsWith("device_tracker."))
-    const cases = [
+    const cases: [Record<string, unknown>, string[]][] = [
       [
         { device: "dev_pixel" },
         ["device_tracker.pixel", "device_tracker.collision", "sensor.pixel"],
@@ -128,6 +128,7 @@ test(
       template: query(include),
     }))
     payload.push({
+      memberships: { "integration:omada_open_api": trackers },
       states,
       registry,
       devices,
@@ -142,7 +143,7 @@ test(
       { input: JSON.stringify(payload), encoding: "utf8" }
     )
     assert.equal(output.status, 0, output.stderr)
-    const results = JSON.parse(output.stdout)
+    const results = rendered(output.stdout)
     cases.forEach(([include, expected], i) =>
       assert.deepEqual(
         results[i].result.map(({ entity }) => entity),
@@ -151,7 +152,7 @@ test(
       )
     )
     assert.deepEqual(
-      results.at(-1).result.map(({ entity }) => entity),
+      results.at(-1)!.result.map(({ entity }) => entity),
       ["device_tracker.pixel"]
     )
   }

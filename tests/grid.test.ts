@@ -1,17 +1,32 @@
+import type { CardConfig, Connection } from "../src/types.ts"
+import type { GridSection } from "../src/grid.ts"
+import {
+  testCard,
+  testConnection,
+  type Callback,
+  type Message,
+  type Request,
+  type TestCard,
+} from "./helpers.ts"
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import { GridController } from "../src/grid.ts"
-import { normalizeConfig } from "../src/query.ts"
+import { normalizeConfig } from "./helpers.ts"
 
 const tick = () => new Promise((resolve) => setImmediate(resolve))
-function fixture(create) {
-  const subscriptions = [],
-    registrySubscriptions = [],
-    created = []
+type TestEntry = Omit<GridController["cards"][number], "card"> & { card: TestCard }
+type TestGrid = Omit<GridController, "cards" | "sections"> & {
+  cards: TestEntry[]
+  sections?: (Omit<GridSection, "cards"> & { cards: TestEntry[] })[]
+}
+function fixture(create?: (config: CardConfig) => Promise<TestCard>) {
+  const subscriptions: Request[] = [],
+    registrySubscriptions: Request[] = [],
+    created: TestCard[] = []
   let stops = 0,
     updates = 0
-  const connection = {
-    subscribeMessage(callback, request) {
+  const connection = testConnection({
+    subscribeMessage(callback: Callback, request: Message) {
       if (request.type !== "render_template") {
         registrySubscriptions.push({ callback, request })
         return Promise.resolve(() => {})
@@ -21,22 +36,22 @@ function fixture(create) {
         stops++
       })
     },
-  }
+  })
   const hass = { connection, states: {} }
   const grid = new GridController(
     create ??
       (async (config) => {
-        const card = { config }
+        const card = testCard(config)
         created.push(card)
         return card
       }),
     () => {
       updates++
     }
-  )
+  ) as unknown as TestGrid
   grid.configure(normalizeConfig({ include: { domain: "light" } }))
   grid.setHass(hass)
-  const emit = (ids, index = subscriptions.length - 1) =>
+  const emit = (ids: unknown, index = subscriptions.length - 1) =>
     subscriptions[index].callback({
       result: Array.isArray(ids)
         ? ids.map((id) => (typeof id === "string" ? { entity: id, group: 0 } : id))
@@ -151,16 +166,17 @@ test("changed queries discard old callbacks and empty results remove previous ca
 })
 
 test("a slow result cannot overwrite a newer selection", async () => {
-  const pending = new Map()
+  const pending = new Map<string | undefined, () => void>()
   const f = fixture(
-    (config) => new Promise((resolve) => pending.set(config.entity, () => resolve({ config })))
+    (config) =>
+      new Promise((resolve) => pending.set(config.entity, () => resolve(testCard(config))))
   )
   f.grid.connect()
   f.emit(["light.old"])
   f.emit(["light.new"])
-  pending.get("light.new")()
+  pending.get("light.new")!()
   await tick()
-  pending.get("light.old")()
+  pending.get("light.old")!()
   await tick()
   assert.deepEqual(
     f.grid.cards.map(({ entity }) => entity),
@@ -170,7 +186,7 @@ test("a slow result cannot overwrite a newer selection", async () => {
 })
 
 test("pending card creation is discarded after disconnect", async () => {
-  let finish
+  let finish!: (value: TestCard) => void
   const f = fixture(
     () =>
       new Promise((resolve) => {
@@ -180,7 +196,7 @@ test("pending card creation is discarded after disconnect", async () => {
   f.grid.connect()
   f.emit(["light.pool"])
   f.grid.disconnect()
-  finish({})
+  finish(testCard({ type: "tile" }))
   await tick()
   assert.deepEqual(f.grid.cards, [])
 })
@@ -190,7 +206,7 @@ test("invalid results show an error and a subsequent valid result recovers", asy
   f.grid.connect()
   f.emit("not a list")
   await tick()
-  assert.match(f.grid.error, /list of entity\/group matches/)
+  assert.match(f.grid.error!, /list of entity\/group matches/)
   f.emit(["light.pool"])
   await tick()
   assert.equal(f.grid.error, undefined)
@@ -203,7 +219,7 @@ test("card helper failures can be retried", async () => {
   let fail = true
   const f = fixture(async () => {
     if (fail) throw new Error("helper failed")
-    return {}
+    return testCard({ type: "tile" })
   })
   f.grid.connect()
   f.emit(["light.pool"])
@@ -245,8 +261,9 @@ test("explicit entity queries preserve independent nested card options", async (
   f.emit(["light.a", "light.b"])
   await tick()
   assert.equal(f.created.length, 2)
-  f.created[0].config.name.type = "device"
-  assert.equal(f.created[1].config.name.type, "entity")
+  const firstName = f.created[0].config.name as { type: string }
+  firstName.type = "device"
+  assert.equal((f.created[1].config.name as { type: string }).type, "entity")
   f.grid.disconnect()
 })
 
@@ -314,8 +331,10 @@ test("a winning-group change replaces the card only if effective configuration c
 })
 
 test("editing group options during pending card creation cannot commit old options", async () => {
-  const pending = []
-  const f = fixture((config) => new Promise((resolve) => pending.push(() => resolve({ config }))))
+  const pending: (() => void)[] = []
+  const f = fixture(
+    (config) => new Promise((resolve) => pending.push(() => resolve(testCard(config))))
+  )
   f.grid.connect()
   f.emit(["light.a"])
   f.grid.configure(normalizeConfig({ include: { domain: "light" }, card: { type: "button" } }))
@@ -331,9 +350,9 @@ test("editing group options during pending card creation cannot commit old optio
 test("identical queries share subscriptions even with different card configurations", async () => {
   const f = fixture()
   const other = new GridController(
-    async (config) => ({ config }),
+    async (config) => testCard(config),
     () => {}
-  )
+  ) as unknown as TestGrid
   other.configure(normalizeConfig({ include: { domain: "light" }, card: { type: "button" } }))
   other.setHass(f.hass)
   f.grid.connect()
@@ -355,7 +374,7 @@ test("group title and membership changes preserve cards and update sections", as
   const f = fixture()
   f.grid.configure(normalizeConfig({ include: { domain: "light" }, group: "area" }))
   f.grid.connect()
-  const section = (value, title, entities) => ({
+  const section = (value: unknown, title: string, entities: string[]) => ({
     value,
     title,
     matches: entities.map((entity) => ({ entity, group: 0 })),
@@ -367,13 +386,13 @@ test("group title and membership changes preserve cards and update sections", as
   f.emit([section("Pool", "Renamed", ["light.a"]), section("Other", "Other", ["light.b"])])
   await tick()
   assert.equal(f.updates, updates + 1)
-  assert.equal(f.grid.sections[0].title, "Renamed")
-  assert.equal(f.grid.sections[0].cards[0].card, a)
+  assert.equal(f.grid.sections![0].title, "Renamed")
+  assert.equal(f.grid.sections![0].cards[0].card, a)
   f.emit([section("Other", "Other", ["light.a", "light.b"])])
   await tick()
-  assert.equal(f.grid.sections.length, 1)
+  assert.equal(f.grid.sections!.length, 1)
   assert.deepEqual(
-    f.grid.sections[0].cards.map(({ card }) => card),
+    f.grid.sections![0].cards.map(({ card }) => card),
     [a, b]
   )
   assert.equal(f.created.length, 2)
@@ -394,17 +413,17 @@ test("grouped card configuration changes use the retained raw selection", async 
   f.grid.configure(normalizeConfig({ ...config, card: { type: "button" } }))
   await tick()
   assert.equal(f.subscriptions.length, 1)
-  assert.equal(f.grid.sections[0].cards[0].card.config.type, "button")
+  assert.equal(f.grid.sections![0].cards[0].card.config.type, "button")
   f.grid.disconnect()
 })
 
 test("pending integration metadata never opens a subscription after disconnection", async () => {
   const f = fixture()
-  let finish
-  f.hass.connection.sendMessagePromise = () =>
-    new Promise((resolve) => {
+  let finish!: (value: unknown) => void
+  f.hass.connection.sendMessagePromise = (() =>
+    new Promise<unknown>((resolve) => {
       finish = resolve
-    })
+    })) as Connection["sendMessagePromise"]
   f.grid.configure(normalizeConfig({ include: { domain: "light" }, group: "integration" }))
   f.grid.connect()
   await tick()
@@ -415,16 +434,16 @@ test("pending integration metadata never opens a subscription after disconnectio
 })
 
 test("changed rendered options update only affected cards, with no ordinary hass work", async () => {
-  const created = []
+  const created: (TestCard & { updates: number })[] = []
   const f = fixture(async (config) => {
-    const card = {
+    const card = Object.assign(testCard(config), {
       config,
       updates: 0,
-      setConfig(next) {
+      setConfig(next: CardConfig) {
         this.config = next
         this.updates++
       },
-    }
+    })
     created.push(card)
     return card
   })
@@ -453,21 +472,21 @@ test("changed rendered options update only affected cards, with no ordinary hass
   assert.equal(f.subscriptions.length, 1)
   f.emit([{ ...rows[0], values: [] }])
   await tick()
-  assert.match(f.grid.error, /template values/)
+  assert.match(f.grid.error!, /template values/)
   assert.equal(a.updates, 1)
   f.grid.disconnect()
 })
 
 test("a rendered card type change replaces rather than reconfigures the element", async () => {
-  const created = []
+  const created: (TestCard & { updates: number })[] = []
   const f = fixture(async (config) => {
-    const card = {
+    const card = Object.assign(testCard(config), {
       config,
       updates: 0,
       setConfig() {
         this.updates++
       },
-    }
+    })
     created.push(card)
     return card
   })
@@ -485,19 +504,18 @@ test("a rendered card type change replaces rather than reconfigures the element"
 })
 
 test("stale asynchronous selections cannot reconfigure retained cards", async () => {
-  let finish
-  const a = {
-    config: undefined,
-    updates: [],
-    setConfig(config) {
+  let finish!: () => void
+  const a = Object.assign(testCard({ type: "tile" }), {
+    updates: [] as unknown[],
+    setConfig(this: TestCard & { updates: unknown[] }, config: CardConfig) {
       this.config = config
       this.updates.push(config.name)
     },
-  }
+  })
   const f = fixture(async (config) => {
     if (config.entity === "light.b")
       return new Promise((resolve) => {
-        finish = () => resolve({ config })
+        finish = () => resolve(testCard(config))
       })
     a.config = config
     return a

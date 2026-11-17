@@ -9,8 +9,9 @@
   "scripts": {
     "build": "vite build",
     "watch": "vite build --watch",
-    "check": "tsc",
-    "test": "node --test tests/*.test.mjs",
+    "check": "tsc && pnpm check:tests",
+    "check:tests": "tsc -p tsconfig.tests.json",
+    "test": "node --test tests/*.test.ts",
     "test:browser": "pnpm build && node tests/browser.mjs && node tests/browser.mjs editor",
     "lint": "oxlint --deny-warnings",
     "lint:fix": "pnpm run lint --fix",

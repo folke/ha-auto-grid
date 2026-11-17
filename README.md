@@ -810,9 +810,12 @@ pnpm build
 pnpm test:browser
 ```
 
-Node 22.18+ is required for native TypeScript test imports. `pnpm test` exercises
-configuration/compiler behavior, subscription sharing/cleanup, races, and keyed card
-reuse. If Python 3 with Jinja2 is available, it also executes generated queries in a
+Node 22.18+ runs the `.test.ts` files directly with `node:test` and native type
+stripping; no test transformer is required. `pnpm check` checks both production and
+test code, and `pnpm check:tests` runs the separate strict test configuration
+(`tsconfig.tests.json`, including erasable-syntax checks). Type stripping itself does
+not typecheck. `pnpm test` exercises configuration/compiler behavior, subscription
+sharing/cleanup, races, and keyed card reuse. If Python 3 with Jinja2 is available, it also executes generated queries in a
 sandbox with mocked HA helpers; otherwise that optional check is skipped.
 
 `pnpm test:browser` requires Chromium (`CHROME_BIN` can override the executable).

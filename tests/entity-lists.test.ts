@@ -2,10 +2,11 @@ import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
 import { test } from "node:test"
-import { normalizeConfig } from "../src/query.ts"
+import { normalizeConfig, rendered } from "./helpers.ts"
 import { renderCardOptions } from "../src/card-templates.ts"
 
-const query = (include, extra = {}) => normalizeConfig({ include, ...extra }).query.template
+const query = (include: unknown, extra: Record<string, unknown> = {}) =>
+  normalizeConfig({ include, ...extra }).query.template
 
 test("entity_id JSON arrays compile identically to native lists, including empty selections", () => {
   for (const ids of [
@@ -40,7 +41,7 @@ test("entity_id JSON arrays compile identically to native lists, including empty
 })
 
 const python = spawnSync("python3", ["-c", "import jinja2"], { encoding: "utf8" })
-const execute = (cases) => {
+const execute = (cases: unknown[]) => {
   const output = spawnSync(
     "python3",
     [fileURLToPath(new URL("./render-template.py", import.meta.url))],
@@ -50,7 +51,7 @@ const execute = (cases) => {
     }
   )
   assert.equal(output.status, 0, output.stderr)
-  return JSON.parse(output.stdout).map(({ result }) => result)
+  return rendered(output.stdout).map(({ result }) => result)
 }
 
 test(
@@ -64,7 +65,7 @@ test(
       "sensor.b": { state: "0", name: "B" },
       "light.c": { state: "on", name: "C" },
     }
-    const cases = [
+    const cases: [Record<string, unknown>, string[]][] = [
       [
         {
           include: { entity_id: '["sensor.b", "sensor.a", "sensor.b", "sensor.missing"]' },

@@ -1,6 +1,7 @@
+import type { AutoGridConfig, HeadingConfig } from "../src/types.ts"
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { normalizeConfig } from "../src/query.ts"
+import { normalizeConfig } from "./helpers.ts"
 import { headingConfig, visibleHeading } from "../src/heading.ts"
 import {
   headingEditorValue,
@@ -14,7 +15,7 @@ const base = {
   include: { type: "light" },
   card: { type: "tile" },
   columns: 2,
-}
+} satisfies AutoGridConfig
 
 test("heading shorthand and legacy title normalize to native cards without changing selection", () => {
   const plain = normalizeConfig(base)
@@ -29,7 +30,7 @@ test("heading shorthand and legacy title normalize to native cards without chang
     assert.deepEqual(normalized.heading, expected)
     assert.deepEqual(normalized.query, plain.query)
   }
-  const heading = {
+  const heading: HeadingConfig = {
     heading: "Office",
     icon: "mdi:desk",
     tap_action: { action: "navigate", navigation_path: "/office" },
@@ -63,7 +64,7 @@ test("invalid headings and ambiguous title/heading configuration are rejected", 
     assert.throws(() => normalizeConfig({ ...base, heading }))
   }
   assert.equal(
-    normalizeConfig({ ...base, heading: { heading_style: "subtitle", heading: "Small" } }).heading
+    normalizeConfig({ ...base, heading: { heading_style: "subtitle", heading: "Small" } }).heading!
       .heading_style,
     "subtitle"
   )
@@ -75,7 +76,7 @@ test("heading editor preserves native options, migrates title only on edits, and
     title: "Office",
     group: "area",
     styler: { preset: "compact" },
-  }
+  } satisfies AutoGridConfig
   const before = structuredClone(config)
   const value = headingEditorValue(config)
   assert.equal(updateHeading(config, value), config)
@@ -89,7 +90,7 @@ test("heading editor preserves native options, migrates title only on edits, and
   assert.equal(edited.heading.heading, "Office")
   assert.equal(edited.heading.type, undefined)
   assert.equal(edited.heading.icon, "mdi:desk")
-  for (const key of ["include", "card", "columns", "group", "styler"])
+  for (const key of ["include", "card", "columns", "group", "styler"] as const)
     assert.deepEqual(edited[key], config[key])
   assert.deepEqual(config, before)
   const disabled = updateHeading(edited, undefined)

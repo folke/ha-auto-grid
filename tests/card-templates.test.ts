@@ -1,13 +1,15 @@
+import type { GridConfig, QueryMatch } from "../src/types.ts"
 import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
 import { test } from "node:test"
-import { normalizeConfig, normalizeResult } from "../src/query.ts"
+import { normalizeResult } from "../src/query.ts"
+import { normalizeConfig, rendered } from "./helpers.ts"
 import { renderCardOptions } from "../src/card-templates.ts"
 
-const compile = (card, extra = {}) =>
+const compile = (card: unknown, extra: Record<string, unknown> = {}) =>
   normalizeConfig({ include: { type: "update" }, card, ...extra })
-const render = (config, row) =>
+const render = (config: GridConfig, row: QueryMatch) =>
   renderCardOptions(
     config.query.cards[row.group],
     config.query.templates[row.group],
@@ -37,11 +39,11 @@ test("only $ keys opt into templating, with nested objects and array paths", () 
     values: ["https://example.com", "Office"],
   })
   assert.equal(card.primary, "{{ entity }}")
-  assert.equal(card.tap_action.url_path, "https://example.com")
-  assert.equal(card.features[0].label, "Office")
+  assert.equal((card.tap_action as Record<string, unknown>).url_path, "https://example.com")
+  assert.equal((card.features as Record<string, unknown>[])[0].label, "Office")
   assert.equal(card.entity, "update.good")
   assert.deepEqual(input, before)
-  assert.equal(config.query.cards[0].tap_action.url_path, "")
+  assert.equal((config.query.cards[0].tap_action as Record<string, unknown>).url_path, "")
   assert.equal(compile({ primary: "{{ entity }}" }).query.templates[0].length, 0)
   assert.doesNotMatch(compile({ primary: "{{ entity }}" }).query.template, /primary/)
 })
@@ -60,7 +62,7 @@ test("template validation rejects ambiguous keys, non-string values, and entity 
     { $: "a" },
     { $$name: "a" },
   ])
-    assert.throws(() => compile(card), undefined, JSON.stringify(card))
+    assert.throws(() => compile(card), JSON.stringify(card))
   assert.throws(() => compile({}, { include: { card: { name: "a", $name: "b" } } }))
 })
 
@@ -99,7 +101,9 @@ test("include overrides merge by destination key, while nested configuration rem
     /card.type/
   )
   for (const values of [undefined, [], [123, "b"], ["a", "b", "c"]])
-    assert.throws(() => render(config, { entity: "update.good", group: 0, values }))
+    assert.throws(() =>
+      render(config, { entity: "update.good", group: 0, values: values as string[] | undefined })
+    )
 })
 
 const python = spawnSync("python3", ["-c", "import jinja2"], { encoding: "utf8" })
@@ -190,11 +194,13 @@ test(
       }
     )
     assert.equal(output.status, 0, output.stderr)
-    const results = JSON.parse(output.stdout).map((result, i) =>
-      normalizeResult(result.result, configs[i])
-    )
+    const results = rendered<QueryMatch[] | import("../src/types.ts").QuerySection[]>(
+      output.stdout
+    ).map((result, i) => normalizeResult(result.result, configs[i]))
     assert.deepEqual(
-      results[0].matches.map((row) => render(configs[0], row).tap_action.url_path),
+      results[0].matches.map(
+        (row) => (render(configs[0], row).tap_action as Record<string, unknown>).url_path
+      ),
       [
         "https://dockge.folke.io/compose/hello%20world",
         "https://servarr.folke.io/compose/media",

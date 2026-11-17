@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
 import { test } from "node:test"
-import { normalizeConfig } from "../src/query.ts"
+import { normalizeConfig, rendered } from "./helpers.ts"
 
 const python = spawnSync("python3", ["-c", "import jinja2"], { encoding: "utf8" })
 test(
@@ -77,7 +77,7 @@ test(
       },
     }
     const selection = { domain: "sensor" }
-    const cases = [
+    const cases: [Record<string, unknown>, string[]][] = [
       [{ include: { integration: "mqtt" } }, ["sensor.b"]],
       [{ include: { integration: ["zha", "mqtt"] } }, ["sensor.a", "sensor.b"]],
       [{ include: { integration: "My MQTT" } }, ["sensor.b"]],
@@ -148,7 +148,7 @@ test(
       }
     )
     assert.equal(output.status, 0, output.stderr)
-    JSON.parse(output.stdout).forEach((actual, i) => {
+    rendered(output.stdout).forEach((actual, i) => {
       assert.deepEqual(
         actual.result.map(({ entity }) => entity),
         cases[i][1],
