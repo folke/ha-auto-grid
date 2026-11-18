@@ -2,6 +2,7 @@ import { normalizeResult } from "./query.ts"
 import { compileHeadingOptions, validateHeading } from "./heading.ts"
 import { renderCardOptions } from "./card-templates.ts"
 import { subscribeTemplate } from "./subscriptions.ts"
+import type { TemplateSubscription } from "./subscriptions.ts"
 import type {
   CardConfig,
   GridConfig,
@@ -34,8 +35,8 @@ export class GridController {
   private config?: GridConfig
   private hass?: HomeAssistant
   private active = false
-  private dispose?: () => void
-  private disposeHeading?: () => void
+  private dispose?: TemplateSubscription
+  private disposeHeading?: TemplateSubscription
   private headingToken = 0
   private revision = 0
   private subscriptionToken = 0
@@ -100,8 +101,10 @@ export class GridController {
   }
 
   retry(): void {
-    this.restartHeading()
-    this.restart()
+    if (this.disposeHeading) this.disposeHeading.retry()
+    else this.restartHeading()
+    if (this.dispose) this.dispose.retry()
+    else this.restart()
   }
 
   private restartHeading(): void {

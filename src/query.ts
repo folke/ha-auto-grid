@@ -425,6 +425,7 @@ function compileQuery(
     "or"
   )
   let needsLifecycle = false
+  const trackSeen = includes.length > 1
   const groups = includes.map((filter, group) => {
     const condition = predicate(filter, sets)
     const { source, trackLifecycle } = candidates(filter)
@@ -445,7 +446,7 @@ function compileQuery(
     ].join(", ")
     return [
       `{% for entity in (${sets.get(source) ?? source}) | unique | list %}`,
-      `{% if entity not in ns.seen and states[entity] is defined and states[entity] is not none and ${condition} and not ${exclusion} %}`,
+      `{% if ${trackSeen ? "entity not in ns.seen and " : ""}states[entity] is defined and states[entity] is not none and ${condition} and not ${exclusion} %}`,
       ...(groupConfig
         ? [
             `{% set ag_value = ${fieldValue(groupConfig.by, group)} %}`,
@@ -453,7 +454,7 @@ function compileQuery(
             "{% set ag_key = ag_group_key(ag_value) %}",
           ]
         : []),
-      `{% set ns.seen = ns.seen + [entity] %}`,
+      ...(trackSeen ? ["{% set ns.seen = ns.seen + [entity] %}"] : []),
       `{% set ns.rows = ns.rows + [{${fields}}] %}`,
       "{% endif %}",
       "{% endfor %}",
@@ -501,7 +502,7 @@ function compileQuery(
       "{%- endmacro %}"
     )
   }
-  lines.push("{% set ns = namespace(rows=[], seen=[]) %}", ...groups)
+  lines.push(`{% set ns = namespace(rows=[]${trackSeen ? ", seen=[]" : ""}) %}`, ...groups)
   if (sorts.length) {
     // Stable least-significant-first sorts preserve higher-priority keys and deterministic ties.
     lines.push("{% set ns.rows = ns.rows | sort(attribute='entity') %}")

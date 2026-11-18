@@ -9,6 +9,7 @@ type Consumer = {
 }
 type Options = { registries?: RegistryKind[]; integrationNames?: boolean }
 type Dispose = () => void | Promise<void>
+export type TemplateSubscription = (() => void) & { retry: () => void }
 type Entry = {
   consumers: Set<Consumer>
   hasValue: boolean
@@ -20,6 +21,7 @@ type Entry = {
   unsubscribe?: Dispose
   releaseRegistries?: () => void
   timer?: ReturnType<typeof setTimeout>
+  retry?: () => void
 }
 const connections = new WeakMap<Connection, Map<string, Entry>>()
 
@@ -49,7 +51,7 @@ export function subscribeTemplate(
   consumer: Consumer,
   variables?: Record<string, unknown>,
   options: Options = {}
-): () => void {
+): TemplateSubscription {
   const kinds = [...new Set(options.registries)].sort()
   const key = JSON.stringify([template, variables ?? {}, kinds, options.integrationNames ?? false])
   let entries = connections.get(connection)
@@ -110,9 +112,9 @@ export function subscribeTemplate(
           .catch(failed)
       } else subscribe(variables)
     }
-    current.releaseRegistries = watchRegistries(connection, kinds, () => {
+    const refresh = (debounce: boolean) => {
       if (current.closed) return
-      const first = !current.stale
+      const first = !current.stale || current.error !== undefined
       current.stale = true
       current.error = undefined
       current.generation++
@@ -122,11 +124,16 @@ export function subscribeTemplate(
       // oxlint-disable-next-line typescript/no-unnecessary-condition
       if (current.closed) return
       clearTimeout(current.timer)
-      current.timer = setTimeout(() => {
-        current.timer = undefined
-        if (!current.closed) open()
-      }, 100)
-    })
+      current.timer = undefined
+      if (debounce) {
+        current.timer = setTimeout(() => {
+          current.timer = undefined
+          if (!current.closed) open()
+        }, 100)
+      } else open()
+    }
+    current.retry = () => refresh(false)
+    current.releaseRegistries = watchRegistries(connection, kinds, () => refresh(true))
     if (!current.timer) open()
   } else {
     entry.consumers.add(consumer)
@@ -135,7 +142,7 @@ export function subscribeTemplate(
     else if (entry.hasValue) consumer.result(entry.value)
   }
   const current = entry
-  return () => {
+  const release = () => {
     current.consumers.delete(consumer)
     if (current.closed || current.consumers.size) return
     current.closed = true
@@ -145,4 +152,9 @@ export function subscribeTemplate(
     if (entries.get(key) === current) entries.delete(key)
     stop(current)
   }
+  return Object.assign(release, {
+    retry: () => {
+      if (current.consumers.has(consumer)) current.retry?.()
+    },
+  })
 }

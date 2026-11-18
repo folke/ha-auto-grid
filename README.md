@@ -54,7 +54,7 @@ the resource instructions shown during installation.
 1. Download **`auto-grid.js`** from the [latest release](https://github.com/folke/ha-auto-grid/releases/latest).
    Use the attached JavaScript asset, not GitHub's source ZIP.
 2. Copy it to `<config>/www/auto-grid.js`.
-3. Add `/local/auto-grid.js?v=0.1.0` as a dashboard resource with type **JavaScript
+3. Add `/local/auto-grid.js?v=0.1.1` as a dashboard resource with type **JavaScript
    module**. Change the version query when updating to avoid stale browser caches.
 
 Refresh the browser after installing or updating. Add a **Manual** card and paste

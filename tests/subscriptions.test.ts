@@ -170,3 +170,96 @@ test("template variables participate in subscription sharing", () => {
   b()
   c()
 })
+
+test("retry refreshes a failed shared entry for every consumer and rejects stale callbacks", async () => {
+  const callbacks: Callback[] = []
+  let stops = 0
+  const connection = testConnection({
+    subscribeMessage(callback: Callback) {
+      callbacks.push(callback)
+      return Promise.resolve(() => {
+        stops++
+      })
+    },
+  })
+  let refreshA = 0,
+    refreshB = 0,
+    refreshC = 0
+  const a = {
+    ...consumer(),
+    refresh: () => {
+      refreshA++
+    },
+  }
+  const b = {
+    ...consumer(),
+    refresh: () => {
+      refreshB++
+    },
+  }
+  const stopA = subscribeTemplate(connection, "query", a)
+  const stopB = subscribeTemplate(connection, "query", b)
+  callbacks[0]({ result: ["cached"] })
+  callbacks[0]({ error: "failed" })
+  stopA.retry()
+  assert.equal(callbacks.length, 2)
+  assert.equal(refreshA, 1)
+  assert.equal(refreshB, 1)
+  const c = {
+    ...consumer(),
+    refresh: () => {
+      refreshC++
+    },
+  }
+  const stopC = subscribeTemplate(connection, "query", c)
+  assert.deepEqual(c.errors, [])
+  assert.deepEqual(c.results, [])
+  assert.equal(refreshC, 1)
+  callbacks[0]({ result: ["stale"] })
+  callbacks[0]({ error: "stale failure" })
+  assert.deepEqual(b.results, [["cached"]])
+  assert.deepEqual(b.errors, ["failed"])
+  callbacks[1]({ error: "failed again" })
+  stopB.retry()
+  assert.equal(refreshA, 2)
+  assert.equal(refreshB, 2)
+  callbacks[2]({ result: ["fresh"] })
+  assert.deepEqual(c.results, [["fresh"]])
+  assert.deepEqual(b.results, [["cached"], ["fresh"]])
+  stopA()
+  stopA.retry()
+  assert.equal(callbacks.length, 3)
+  stopB()
+  stopC()
+  await tick()
+  assert.equal(stops, 3)
+})
+
+test("retry disposes late subscription setup without closing the replacement", async () => {
+  const resolvers: ((value: Dispose) => void)[] = []
+  const callbacks: Callback[] = []
+  const stopped: string[] = []
+  const connection = testConnection({
+    subscribeMessage(callback: Callback) {
+      callbacks.push(callback)
+      return new Promise<Dispose>((resolve) => resolvers.push(resolve))
+    },
+  })
+  const a = consumer()
+  const stop = subscribeTemplate(connection, "query", a)
+  stop.retry()
+  resolvers[0](() => {
+    stopped.push("old")
+  })
+  resolvers[1](() => {
+    stopped.push("new")
+  })
+  await tick()
+  assert.deepEqual(stopped, ["old"])
+  callbacks[0]({ result: ["stale"] })
+  callbacks[1]({ result: ["fresh"] })
+  assert.deepEqual(a.results, [["fresh"]])
+  stop()
+  await tick()
+  assert.deepEqual(stopped, ["old", "new"])
+})

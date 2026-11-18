@@ -368,6 +368,17 @@ test("limits, numeric comparison, and multi-sort are compiled into the backend q
   assert.ok(template.indexOf("sort(attribute='sort1'") < template.indexOf("sort(attribute='sort0'"))
 })
 
+test("single-include queries rely on unique candidates without redundant seen tracking", () => {
+  for (const include of [{ state: "unavailable" }, { entity: ["light.a", "light.a"] }]) {
+    const template = query(include)
+    assert.doesNotMatch(template, /ns\.seen|seen=\[\]/)
+    assert.match(template, /\| unique \| list/)
+  }
+  const multiple = query([{ domain: "light" }, { state: "unavailable" }])
+  assert.match(multiple, /entity not in ns\.seen/)
+  assert.match(multiple, /ns\.seen = ns\.seen \+ \[entity\]/)
+})
+
 test("card-only edits generate the exact same query for sharing subscriptions", () => {
   assert.equal(
     query({ domain: "light", card: { type: "tile" } }),

@@ -208,6 +208,46 @@ test("invalid results show an error and a subsequent valid result recovers", asy
   f.grid.disconnect()
 })
 
+test("retry recovers shared selection and heading errors for both grids", async () => {
+  const f = fixture()
+  const config = normalizeConfig({
+    include: { entity: "light.a" },
+    heading: "{{ states('sensor.count') }}",
+  })
+  f.grid.configure(config)
+  const other = new GridController(
+    async (card) => testCard(card),
+    () => {}
+  )
+  other.configure(config)
+  other.setHass(f.hass)
+  f.grid.connect()
+  other.connect()
+  assert.equal(f.subscriptions.length, 2)
+  f.subscriptions[0].callback({ error: "heading failed" })
+  f.subscriptions[1].callback({ error: "query failed" })
+  assert.equal(f.grid.error, "query failed")
+  assert.equal(other.error, "query failed")
+  f.grid.retry()
+  assert.equal(f.subscriptions.length, 4)
+  assert.equal(f.grid.error, undefined)
+  assert.equal(other.error, undefined)
+  assert.equal(f.grid.headingError, undefined)
+  assert.equal(other.headingError, undefined)
+  assert.equal(other.loading, true)
+  f.subscriptions[2].callback({ result: ["Recovered"] })
+  f.subscriptions[3].callback({ result: [{ entity: "light.a", group: 0 }] })
+  await tick()
+  assert.equal(f.grid.cards.length, 1)
+  assert.equal(other.cards.length, 1)
+  assert.equal(other.heading!.heading, "Recovered")
+  assert.equal(other.loading, false)
+  f.grid.disconnect()
+  other.disconnect()
+  await tick()
+  assert.equal(f.stops, 4)
+})
+
 test("card helper failures can be retried", async () => {
   let fail = true
   const f = fixture(async () => {
