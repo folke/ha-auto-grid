@@ -617,13 +617,18 @@ Templates receive:
 - `entity`: the selected entity ID string, matching Mushroom's convention.
 - `config`: the effective static card configuration, with the selected `entity`
   injected. Ordinary strings/templates remain literal; `$` properties are excluded.
-- `area`: the statically configured `config.area`, or `none` when absent/templated.
 - `group`, `group_name`, `group_count`: the current visual group's values when grouping
   is enabled; otherwise `none`, an empty string, and `0`, respectively.
 
-Templates do **not** depend on evaluation order: `$area` does not become `area` for a
-sibling `$name`, nor do rendered values get injected into `config` for other templates.
-Use entity attributes or static `config` values for shared inputs.
+Use HA's `area_name(entity)` or `area_id(entity)` to resolve the entity's area,
+including area assignment through its device. `config.area`, if configured, is only
+a static child-card option—not the entity's resolved area. There is no injected
+`area` variable. These helpers also work in group-heading templates, where `entity`
+is the first entity ID in that group.
+
+Templates do **not** depend on evaluation order: rendered `$` values are not injected
+into `config` for sibling templates. Use HA helpers or static `config` values for
+shared inputs.
 
 Values render **after selection, exclusions, sorting, and limiting**, for the winning
 include only. Changing the rendered options updates the affected cards.

@@ -22,7 +22,7 @@ test("only $ keys opt into templating, with nested objects and array paths", () 
     type: "custom:mushroom-template-card",
     primary: "{{ entity }}",
     tap_action: { action: "url", $url_path: "{{ entity }}" },
-    features: [{ $label: "{{ area }}" }],
+    features: [{ $label: "{{ area_name(entity) }}" }],
   }
   const before = structuredClone(input)
   const config = compile(input)
@@ -153,7 +153,7 @@ test(
           empty: null,
           primary: "{{ entity_name(entity) }}",
           $secondary:
-            "{{ entity }}|{{ config.entity }}|{{ area }}|{{ config.area }}|{{ config.enabled }}|{{ config.empty is none }}|{{ config.primary }}",
+            "{{ entity }}|{{ config.entity }}|{{ area is undefined }}|{{ area_name(entity) }}|{{ area_id(entity) }}|{{ config.area }}|{{ config.enabled }}|{{ config.empty is none }}|{{ config.primary }}",
         },
       }),
       normalizeConfig({
@@ -163,7 +163,7 @@ test(
       }),
       normalizeConfig({
         include: { entity_id: "update.wud_dockge" },
-        card: { $area: "office", $name: "{{ area is none }}/{{ 'area' not in config }}" },
+        card: { $area: "office", $name: "{{ area is undefined }}/{{ 'area' not in config }}" },
       }),
       normalizeConfig({
         include: { type: "update" },
@@ -188,7 +188,12 @@ test(
       [fileURLToPath(new URL("render-template.py", import.meta.url))],
       {
         input: JSON.stringify(
-          configs.map((config) => ({ states, template: config.query.template }))
+          configs.map((config) => ({
+            states,
+            template: config.query.template,
+            registry: { "update.wud_dockge": { area_id: "kitchen" } },
+            areas: { kitchen: { name: "Kitchen" } },
+          }))
         ),
         encoding: "utf8",
       }
@@ -209,7 +214,7 @@ test(
     )
     assert.equal(
       render(configs[1], results[1].matches[0]).secondary,
-      "update.wud_dockge|update.wud_dockge|office|office|True|True|{{ entity_name(entity) }}"
+      "update.wud_dockge|update.wud_dockge|True|Kitchen|kitchen|office|True|True|{{ entity_name(entity) }}"
     )
     assert.deepEqual(
       results[2].matches.map((row) => render(configs[2], row).name),

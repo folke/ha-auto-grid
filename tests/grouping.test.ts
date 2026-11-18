@@ -324,7 +324,9 @@ test(
       group: {
         by: "entity",
         heading: {
-          heading: "{{ entity }} / {{ group_name }} / {{ states(entity) }} / {{ group_count }}",
+          area: "configured",
+          heading:
+            "{{ entity }} / {{ group_name }} / {{ states(entity) }} / {{ group_count }} / {{ area is undefined }} / {{ area_name(entity) }} / {{ area_id(entity) }} / {{ config.area }}",
           $icon: "{{ 'mdi:lightbulb-on' if states(entity) == 'on' else 'mdi:lightbulb' }}",
           heading_style: "title",
           badges: [{ type: "entity", $entity: "{{ entity }}" }],
@@ -341,6 +343,9 @@ test(
           {
             template: config.query.template,
             states: { "light.a": { state: "on" }, "light.b": { state: "off" } },
+            registry: { "light.a": { area_id: "kitchen" }, "light.b": { device_id: "b" } },
+            devices: { b: { area_id: "hall" } },
+            areas: { kitchen: { name: "Kitchen" }, hall: { name: "Hall" } },
           },
         ]),
       }
@@ -348,7 +353,8 @@ test(
     assert.equal(output.status, 0, output.stderr)
     const result = normalizeResult(rendered<QuerySection[]>(output.stdout)[0].result, config)
     assert.deepEqual(result.sections![0].heading, {
-      heading: "light.a / light.a / on / 2",
+      area: "configured",
+      heading: "light.a / light.a / on / 2 / True / Kitchen / kitchen / configured",
       heading_style: "title",
       icon: "mdi:lightbulb-on",
       type: "heading",
@@ -356,6 +362,10 @@ test(
       tap_action: { action: "url", url_path: "/lights/light.a" },
     })
     assert.equal(result.sections![1].heading.icon, "mdi:lightbulb")
+    assert.equal(
+      result.sections![1].heading.heading,
+      "light.b / light.b / off / 2 / True / Hall / hall / configured"
+    )
     assert.equal(result.sections![1].heading.entity, undefined)
   }
 )

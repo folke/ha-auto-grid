@@ -78,10 +78,12 @@ for case in payload:
         entry = case.get("registry", {}).get(entity, {})
         return case.get("devices", {}).get(entry.get("device_id"), {})
 
-    def entity_area(entity):
+    def entity_area_id(entity):
         entry = case.get("registry", {}).get(entity, {})
-        area_id = entry.get("area_id") or entity_device(entity).get("area_id")
-        return case.get("areas", {}).get(area_id, {})
+        return entry.get("area_id") or entity_device(entity).get("area_id")
+
+    def entity_area(entity):
+        return case.get("areas", {}).get(entity_area_id(entity), {})
 
     def config_entry_attr(entry_id, attribute):
         if not isinstance(entry_id, str):
@@ -96,6 +98,7 @@ for case in payload:
     env.globals.update(
         entity_name=entity_name,
         area_name=lambda entity: entity_area(entity).get("name"),
+        area_id=entity_area_id,
         floor_name=lambda entity: case.get("floors", {}).get(entity_area(entity).get("floor_id"), {}).get("name"),
         device_id=lambda entity: case.get("registry", {}).get(entity, {}).get("device_id"),
         device_name=lambda entity: entity_device(entity).get("name_by_user") or entity_device(entity).get("name"),

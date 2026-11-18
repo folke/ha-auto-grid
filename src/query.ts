@@ -469,7 +469,7 @@ function compileQuery(
   options.forEach(({ templates }, group) =>
     templates.forEach(({ source }, index) => {
       lines.push(
-        `{% macro ag_option_${group}_${index}(entity, config, area, group, group_name, group_count) -%}${source}{%- endmacro %}`
+        `{% macro ag_option_${group}_${index}(entity, config, group, group_name, group_count) -%}${source}{%- endmacro %}`
       )
     })
   )
@@ -480,8 +480,7 @@ function compileQuery(
       result.push(
         `{% if ${row}.group == ${group} %}`,
         `{% set config = dict(${jinjaValue(context)}, entity=${row}.entity) %}`,
-        "{% set area = config.get('area') %}",
-        `{% set ag_values = [${templates.map((_, index) => `(ag_option_${group}_${index}(${row}.entity, config, area, group, group_name, group_count) | trim)`).join(", ")}] %}`,
+        `{% set ag_values = [${templates.map((_, index) => `(ag_option_${group}_${index}(${row}.entity, config, group, group_name, group_count) | trim)`).join(", ")}] %}`,
         "{% set ag_match = dict(ag_match, values=ag_values) %}",
         "{% endif %}"
       )
@@ -527,7 +526,7 @@ function compileQuery(
     lines.push(
       ...headingPlan!.templates.map(
         ({ source }, index) =>
-          `{% macro ag_heading_${index}(entity, config, area, group, group_name, group_count) -%}${source}{%- endmacro %}`
+          `{% macro ag_heading_${index}(entity, config, group, group_name, group_count) -%}${source}{%- endmacro %}`
       ),
       "{% set group_count = ag_rows | map(attribute='bucket_key') | unique(case_sensitive=true) | list | count %}",
       "{% set sections = namespace(rows=[], keys=[]) %}",
@@ -542,7 +541,7 @@ function compileQuery(
       "{% set members.rows = members.rows + [ag_match] %}",
       "{% endfor %}",
       `{% set config = dict(${jinjaValue(headingPlan!.context)}, entity=row.entity) %}`,
-      `{% set ag_heading_values = [${headingPlan!.templates.map((_, index) => `(ag_heading_${index}(row.entity, config, config.get('area'), group, group_name, group_count) | trim)`).join(", ")}] %}`,
+      `{% set ag_heading_values = [${headingPlan!.templates.map((_, index) => `(ag_heading_${index}(row.entity, config, group, group_name, group_count) | trim)`).join(", ")}] %}`,
       `{% set ag_heading = ${headingExpression(headingPlan!)} %}`,
       "{% set sections.rows = sections.rows + [{'key': row.bucket_key, 'value': group, 'title': ag_heading.get('heading', ''), 'heading': ag_heading, 'matches': members.rows}] %}",
       "{% endif %}",
