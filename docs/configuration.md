@@ -152,29 +152,16 @@ sort: []
 `sort: []` preserves the supplied order. `include: []` selects nothing; `include: {}`
 selects every entity with a state. Be mindful of HA's rate limits for broad queries.
 
-### JSON entity lists
+### Templated entity lists
 
-`entity` also accepts a string containing a JSON array of non-empty strings:
+`entity` accepts a string or a native list of non-empty strings. There is no special
+JSON-string parsing: a literal `entity: '["sensor.b", "sensor.a"]'` is text, not a list.
+Duplicates in native lists are removed, and `sort: []` preserves their order.
+Glob/regex entries use normal matching. Empty lists select nothing; excluding an
+empty list removes nothing, and negating it matches all otherwise eligible entities.
 
-```yaml
-include:
-  entity: '["sensor.b", "sensor.a"]'
-sort: []
-```
-
-This is equivalent to a normal YAML list. Duplicates are removed, and `sort: []`
-preserves list order.
-Glob/regex entries still use normal matching. Empty lists (`entity: []` or `"[]"`)
-select nothing; excluding an empty list removes nothing, and negating it matches all
-otherwise eligible entities.
-
-Only `entity` parses JSON this way. Strings starting with `[` after whitespace
-must be valid JSON arrays; malformed JSON and non-string/empty entries produce a
-configuration error. Python-style `['sensor.foo']` is not JSON—use `| to_json`.
-Other fields and `$` template output types are unchanged.
-
-This lets an outer Auto Grid supply a generated selection to an inner grid without
-turning arbitrary card templates into native lists:
+Template results use the [same typed decoding](#template-result-types) for every
+option. This lets an outer Auto Grid supply a generated selection to an inner grid:
 
 ```yaml
 type: custom:auto-grid
@@ -192,14 +179,14 @@ card:
         type: tile
     # Then the related IDs, in their original order
     - $entity: >-
-        {{ state_attr(entity, 'entities') | default([], true) | to_json }}
+        {{ state_attr(entity, 'entities') | default([], true) }}
       card:
         type: custom:mushroom-entity-card
 ```
 
 The outer grid resolves both `$entity` values in the parent entity's context. The
-inner grid parses the resulting JSON string normally. Missing/empty `entities` leaves
-just the alert header.
+inner grid receives an actual list, using the same template-result rules as any
+other property. Missing/empty `entities` leaves just the alert header.
 
 ## Filter rules
 
@@ -213,7 +200,7 @@ the filters on the backend.
 | `device`       | Device ID or effective name; exact, wildcard, `/regex/`, or a list   |
 | `label`        | Label ID/name, or a list                                             |
 | `domain`       | Exact domain name, or a list, e.g. `light`                           |
-| `entity`       | Exact ID, wildcard, `/regex/`, native list, or JSON-array string     |
+| `entity`       | Exact ID, wildcard, `/regex/`, or a native list                      |
 | `type`         | HA-style entity type: domain or domain/device_class, or a list       |
 | `hidden`       | Boolean; whether HA's entity registry marks the entity as hidden     |
 | `state`        | Exact value, wildcard, `/regex/`, numeric comparison, or a list      |
@@ -622,9 +609,10 @@ card:
 
 Only `$` keys opt in. Unprefixed strings, including Jinja intended for Mushroom or
 another custom card, pass through unchanged. Nested objects and objects inside arrays
-are supported. Each `$` value must be a string; rendered output is a string with outer
-whitespace trimmed, not parsed as JSON, a number, a boolean, or an object. Mark scalar
-fields such as `$url_path`, not an entire action object. A static value is also valid.
+are supported. Each `$` source must be a string, but its rendered result can be a
+number, boolean, `null`, list, object, or text. Entire properties such as `$features`
+or `$tap_action` can return lists/objects, not just string-valued leaves. A static
+template source is also valid.
 
 `url_path` and `$url_path` cannot appear in the same object. Empty `$` keys and doubled
 prefixes such as `$$name` are rejected. Per-include overrides still merge shallowly,
@@ -650,6 +638,46 @@ shared inputs.
 
 Values render **after selection, exclusions, sorting, and limiting**, for the winning
 include only. Changing the rendered options updates the affected cards.
+
+### Template result types
+
+Template results are decoded **once per `$` property**, consistently for Auto Grid,
+Auto Card, and headings. JSON and Jinja's Python-style data literals are supported:
+
+| Template source                 | Result            |
+| ------------------------------- | ----------------- |
+| `{{ 123 }}`                     | Number `123`      |
+| `{{ true }}`                    | Boolean `true`    |
+| `{{ none }}`                    | `null`            |
+| `{{ ['light.a', 'light.b'] }}`  | A native list     |
+| `{{ {'action': 'more-info'} }}` | A native object   |
+| `Count: {{ 123 }}`              | Text `Count: 123` |
+| `{{ "123" \| to_json }}`        | String `"123"`    |
+
+**To force a string, JSON-encode the text with `to_json`.** A valid JSON-encoded
+string is unquoted/unescaped once. `{{ 123 | string | to_json }}` reliably returns
+text; `{{ 123 | string }}` alone still renders numeric text and becomes a number.
+This also preserves strings resembling booleans, lists, or objects, and correctly
+handles embedded quotes, backslashes, newlines, and intentional surrounding spaces.
+
+```yaml
+card:
+  type: custom:example-card
+  $enabled: "{{ is_state('light.pool', 'on') }}"
+  $features: "{{ [{'type': 'toggle'}] }}"
+  $name: "{{ states('sensor.count') | to_json }}"
+```
+
+Nested values are **not** decoded recursively: `{{ ['123', 'True', '[1]'] }}` keeps
+all three list entries as strings. Ordinary configuration strings are never parsed.
+Unquoted text is trimmed; JSON-string contents retain their whitespace. Unrecognized
+or malformed literals remain text; expressions are never executed by the decoder.
+Containers must use lists and string-keyed objects. Numbers use JavaScript's numeric
+precision; use the string convention for identifiers or exact numeric text.
+
+The destination still needs the correct type: `type`, heading text, and heading icons
+must be strings, while a `$badges` template can return a native array. For a numeric
+heading, write `$heading: "{{ count | string | to_json }}"`.
 
 ### Container update links
 

@@ -57,7 +57,7 @@ test("static standalone cards need no subscription and do not inject an entity",
   assert.equal(f.requests.length, 0)
 })
 
-test("standalone context exposes only static config and entity; results remain strings", () => {
+test("standalone context exposes only static config and entity; results preserve native types", () => {
   const f = fixture()
   const card = {
     type: "tile",
@@ -79,10 +79,10 @@ test("standalone context exposes only static config and entity; results remain s
     entity: "light.a",
   })
   f.requests[0].callback({ result: ["true", "123"] })
-  assert.equal(f.results[0].name, "true")
-  assert.deepEqual(f.results[0].tap_action, { action: "url", url_path: "123" })
-  f.requests[0].callback({ result: [true, 123] })
-  assert.match(f.errors[0], /must be strings/)
+  assert.equal(f.results[0].name, true)
+  assert.deepEqual(f.results[0].tap_action, { action: "url", url_path: 123 })
+  f.requests[0].callback({ result: [undefined, 123] })
+  assert.match(f.errors[0], /JSON-compatible/)
   stop()
 })
 
@@ -95,7 +95,7 @@ test("templated entity does not become a sibling shorthand; identical plans shar
   assert.equal(f.requests.length, 1)
   f.requests[0].callback({ result: ["light.a", "True"] })
   assert.equal(f.results[0].entity, "light.a")
-  assert.equal(f.results[0].name, "True")
+  assert.equal(f.results[0].name, true)
   a()
   b()
 })

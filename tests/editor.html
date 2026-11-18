@@ -915,6 +915,94 @@
         )
         rootHeadingEditor.remove()
         await tick()
+        const typedEditor = await customElements.get("auto-card").getConfigElement()
+        typedEditor.hass = hass
+        typedEditor.setConfig({
+          card: {
+            type: "tile",
+            entity: "light.pool",
+            $count: "{{ 123 }}",
+            $name: '{{ "123" | to_json }}',
+            $features: "{{ [{'type': 'toggle', 'enabled': true}] }}",
+          },
+          heading: {
+            $heading: '{{ "123" | to_json }}',
+            $badges: "{{ [{'type': 'entity', 'entity': 'sensor.count'}] }}",
+          },
+        })
+        const typedEdits = []
+        typedEditor.addEventListener("config-changed", (event) =>
+          typedEdits.push(event.detail.config)
+        )
+        const beforeTyped = queries().length
+        document.body.append(typedEditor)
+        await tick()
+        const typedQueries = queries().slice(beforeTyped)
+        typedQueries
+          .find(({ request }) => request.template.includes("ag_card_0"))
+          .callback({ result: ["123", '"123"', "[{'type': 'toggle', 'enabled': True}]"] })
+        typedQueries
+          .find(({ request }) => request.template.includes("ag_heading_0"))
+          .callback({ result: ['"123"', "[{'type': 'entity', 'entity': 'sensor.count'}]"] })
+        await tick()
+        const typedNative = query(typedEditor.shadowRoot, "hui-card-element-editor.card-native")
+        const typedHeadingNative = query(
+          typedEditor.shadowRoot,
+          "hui-card-element-editor.heading-native"
+        )
+        assert(
+          typedNative.value.count === 123 &&
+            typedNative.value.name === "123" &&
+            typedNative.value.features[0].enabled === true,
+          "native editor snapshots preserve decoded result types without decoding forced strings twice"
+        )
+        assert(
+          typedHeadingNative.value.heading === "123" &&
+            Array.isArray(typedHeadingNative.value.badges) &&
+            typedEdits.length === 0,
+          "heading editor snapshots accept templated badge arrays and forced text without saving"
+        )
+        typedNative.dispatchEvent(new Event("input", { bubbles: true }))
+        emit(typedNative, "config-changed", {
+          config: { ...typedNative.value, icon: "mdi:pool", features: [] },
+        })
+        await tick()
+        assert(
+          typedEdits.at(-1).card.icon === "mdi:pool" &&
+            typedEdits.at(-1).card.$features &&
+            typedEdits.at(-1).card.features === undefined &&
+            typedEdits.at(-1).card.name === undefined &&
+            typedNative.value.features[0].enabled === true,
+          "visual edits preserve whole-property array templates and restore their typed snapshot values"
+        )
+        typedEditor.remove()
+        await tick()
+        const typedGridEditor = await makeEditor({
+          include: { entity: "light.preview" },
+          card: {
+            type: "tile",
+            $name: '{{ "123" | to_json }}',
+            $features: "{{ [{'type': 'toggle'}] }}",
+          },
+        })
+        queries()
+          .at(-1)
+          .callback({
+            result: [
+              { entity: "light.preview", group: 0, values: ['"123"', "[{'type': 'toggle'}]"] },
+            ],
+          })
+        await tick()
+        const typedGridNative = query(
+          typedGridEditor.editor.shadowRoot,
+          "hui-card-element-editor.card-native"
+        )
+        assert(
+          typedGridNative.value.name === "123" && Array.isArray(typedGridNative.value.features),
+          "Auto Grid editor preserves already-decoded strings and arrays from selection results"
+        )
+        typedGridEditor.remove()
+        await tick()
         document.body.dataset.status = "passed"
         query(document, "#result").textContent = `Passed ${assertions} browser assertions`
       } catch (error) {

@@ -446,7 +446,7 @@ test("grouped card configuration changes use the retained raw selection", async 
     {
       value: 0,
       title: "0",
-      heading: { type: "heading", heading_style: "subtitle", heading: "0" },
+      heading: { type: "heading", heading_style: "subtitle", heading: '"0"' },
       matches: [{ entity: "light.a", group: 0 }],
     },
   ])
@@ -649,7 +649,7 @@ test("main heading edits never reopen selection; static headings need no subscri
   dynamic.callback({ result: ["Dynamic"] })
   assert.equal(f.grid.heading!.heading, "Dynamic")
   dynamic.callback({ result: [false] })
-  assert.match(f.grid.headingError!, /must be strings/)
+  assert.match(f.grid.headingError!, /heading.heading must be a string/)
   f.grid.configure(normalizeConfig({ include: { domain: "light" }, heading: "Static again" }))
   dynamic.callback({ result: ["Stale"] })
   assert.equal(f.grid.heading!.heading, "Static again")

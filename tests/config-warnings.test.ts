@@ -10,9 +10,9 @@ test("filter types expose only canonical keys", () => {
   assert.equal(canonicalOnly, true)
 })
 
-test("entity is canonical for filters, sorting, grouping, and JSON lists", () => {
+test("entity is canonical for filters, sorting, grouping, and native lists", () => {
   const config = normalizeConfig({
-    include: { entity: '["light.b", "light.a"]' },
+    include: { entity: ["light.b", "light.a"] },
     sort: "entity",
     group: "entity",
   })
@@ -55,7 +55,7 @@ test("entity_id aliases normalize on a clone with stable, path-specific warnings
 
 test("only unambiguous entity aliases recover; unknown filters remain errors", () => {
   assert.equal(
-    normalizeConfig({ include: { entity: "light.a", entity_id: '["light.a"]' } }).warnings.length,
+    normalizeConfig({ include: { entity: "light.a", entity_id: ["light.a"] } }).warnings.length,
     1
   )
   assert.throws(

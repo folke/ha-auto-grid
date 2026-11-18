@@ -133,7 +133,15 @@ embedded in the backend query to provide the template's `config` context. Only
 rendered values are sent back alongside entity IDs. Editing the context or templates
 can therefore reopen the query; purely static card edits do not.
 
-Values render after selection, exclusions, sorting, and limiting. There are no
+Values render after selection, exclusions, sorting, and limiting. The batched backend
+payload carries each macro's rendered text. `src/template-values.ts` decodes each
+option once at the subscription/result boundary, before applying it to a child or
+heading. It accepts JSON and a safe Python-style data-literal subset without `eval`;
+quoted JSON strings explicitly preserve text. Nested strings are never reinterpreted.
+`renderCardOptions()` applies already-decoded values and clones containers per child,
+so editor snapshots and retained selections do not decode string escapes twice.
+Entity selection consumes ordinary strings/lists without field-specific JSON parsing.
+There are no
 per-card or per-field subscriptions. Changed effective options call `setConfig()`
 when available; changing the card type replaces the element.
 

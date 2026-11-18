@@ -1,3 +1,4 @@
+import { decodeTemplateValues } from "./template-values.ts"
 import { compileCardOptions, renderCardOptions } from "./card-templates.ts"
 import { compileHeadingOptions, validateHeading } from "./heading.ts"
 import { subscribeTemplate } from "./subscriptions.ts"
@@ -34,9 +35,11 @@ export function subscribeCardOptions(
       refresh: consumer.refresh,
       result: (values) => {
         try {
-          if (!Array.isArray(values) || values.some((value) => typeof value !== "string"))
-            throw new Error(`${heading ? "Heading" : "Card"} template values must be strings`)
-          const rendered = renderCardOptions(plan.card, plan.templates, values as string[])
+          const rendered = renderCardOptions(
+            plan.card,
+            plan.templates,
+            decodeTemplateValues(values)
+          )
           consumer.result(heading ? validateHeading(rendered) : rendered)
         } catch (error) {
           consumer.error(error instanceof Error ? error : new Error(String(error)))

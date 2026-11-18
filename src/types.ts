@@ -119,10 +119,18 @@ export interface AutoGridConfig {
   [key: string]: unknown
 }
 
+export type TemplateValue =
+  | null
+  | boolean
+  | number
+  | string
+  | TemplateValue[]
+  | { [key: string]: TemplateValue }
+
 export interface QueryMatch {
   entity: string
   group: number
-  values?: string[]
+  values?: TemplateValue[]
 }
 
 export interface CardTemplate {

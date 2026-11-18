@@ -1,5 +1,11 @@
 import { normalizeColumns } from "./layout.ts"
-import { compileCardOptions, mergeCardOptions, validateCardOptions } from "./card-templates.ts"
+import { decodeTemplateValues } from "./template-values.ts"
+import {
+  compileCardOptions,
+  renderCardOptions,
+  mergeCardOptions,
+  validateCardOptions,
+} from "./card-templates.ts"
 import { compileHeadingOptions, headingConfig, validateHeading } from "./heading.ts"
 import type {
   AutoGridConfig,
@@ -55,16 +61,9 @@ function object(value: unknown, name: string): asserts value is Record<string, u
   }
 }
 
-function strings(value: unknown, name: string, allowJson = false): string[] {
-  if (allowJson && typeof value === "string" && /^\s*\[/.test(value)) {
-    try {
-      value = JSON.parse(value)
-    } catch {
-      throw new Error(`${name} must contain a valid JSON array; use | to_json in templates`)
-    }
-  }
+function strings(value: unknown, name: string, allowEmpty = false): string[] {
   const values = Array.isArray(value) ? value : [value]
-  if ((!allowJson && !values.length) || values.some((v) => typeof v !== "string" || !v.trim())) {
+  if ((!allowEmpty && !values.length) || values.some((v) => typeof v !== "string" || !v.trim())) {
     throw new Error(`${name} must be a non-empty string or list of non-empty strings`)
   }
   return values as string[]
@@ -581,16 +580,10 @@ export function normalizeMatches(value: unknown, groupCount: number): QueryMatch
     }
     if (!seen.has(row.entity)) {
       seen.add(row.entity)
-      if (
-        row.values !== undefined &&
-        (!Array.isArray(row.values) || row.values.some((v) => typeof v !== "string"))
-      ) {
-        throw new Error("Card template values must be strings")
-      }
       matches.push({
         entity: row.entity,
         group: row.group,
-        ...(row.values === undefined ? {} : { values: row.values as string[] }),
+        ...(row.values === undefined ? {} : { values: decodeTemplateValues(row.values) }),
       })
     }
   }
@@ -647,8 +640,9 @@ function registryDependencies(
   if (group) field(group.by)
   const headingTemplates = group ? compileHeadingOptions(group.heading).templates : []
   const custom =
-    headingTemplates.some(({ source }) => source !== "{{ group_name }}" && /{{|{%/.test(source)) ||
-    plans.some((plan) => plan.templates.some(({ source }) => /{{|{%/.test(source)))
+    headingTemplates.some(
+      ({ source }) => source !== "{{ group_name | string | to_json }}" && /{{|{%/.test(source)
+    ) || plans.some((plan) => plan.templates.some(({ source }) => /{{|{%/.test(source)))
   if (custom) allRegistries.forEach((kind) => result.add(kind))
   return allRegistries.filter((kind) => result.has(kind))
 }
@@ -662,7 +656,16 @@ export function normalizeResult(value: unknown, config: GridConfig): QueryResult
     object(section, "Query section")
     if (typeof section.title !== "string") throw new Error("Group title must be a string")
     object(section.heading, "Group heading")
-    const heading = validateHeading(section.heading as CardConfig)
+    const plan = compileHeadingOptions(config.query.group!.heading)
+    const values = plan.templates.map(({ path }) => {
+      let child: unknown = section.heading
+      for (const part of path)
+        child = (child as Record<string | number, unknown> | undefined)?.[part]
+      return child
+    })
+    const heading = validateHeading(
+      renderCardOptions(section.heading as CardConfig, plan.templates, decodeTemplateValues(values))
+    )
     const key = groupKey(section.value)
     if (keys.has(key)) throw new Error("Duplicate group in query result")
     keys.add(key)
@@ -672,7 +675,13 @@ export function normalizeResult(value: unknown, config: GridConfig): QueryResult
       if (entities.has(row.entity)) throw new Error("Entity appears in multiple groups")
       entities.add(row.entity)
     }
-    return { heading, key, matches, title: section.title, value: section.value as GroupValue }
+    return {
+      heading,
+      key,
+      matches,
+      title: typeof heading.heading === "string" ? heading.heading : "",
+      value: section.value as GroupValue,
+    }
   })
   return { matches: sections.flatMap((section) => section.matches), sections }
 }
@@ -695,7 +704,7 @@ function normalizeGroup(value: AutoGridConfig["group"]): GroupConfig | undefined
   if (by !== "group" && !isField(by)) throw new Error("Unknown group.by")
   const heading = headingConfig(
     group.heading === undefined && group.$heading === undefined
-      ? { $heading: "{{ group_name }}" }
+      ? { $heading: "{{ group_name | string | to_json }}" }
       : {
           $heading: group.$heading as string | undefined,
           heading: group.heading as AutoGridConfig["heading"],

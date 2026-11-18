@@ -16,14 +16,22 @@ test("group configuration normalizes shorthand and validates fields", () => {
   for (const group of [true, {}, { by: "group" }, "group"]) {
     assert.deepEqual(normalizeConfig({ include: selection, group }).query.group, {
       by: "group",
-      heading: { type: "heading", heading_style: "subtitle", $heading: "{{ group_name }}" },
+      heading: {
+        type: "heading",
+        heading_style: "subtitle",
+        $heading: "{{ group_name | string | to_json }}",
+      },
     })
   }
   assert.equal(normalizeConfig({ include: selection }).query.group, undefined)
   assert.equal(normalizeConfig({ include: selection, group: false }).query.group, undefined)
   assert.deepEqual(normalizeConfig({ include: selection, group: "area" }).query.group, {
     by: "area",
-    heading: { type: "heading", heading_style: "subtitle", $heading: "{{ group_name }}" },
+    heading: {
+      type: "heading",
+      heading_style: "subtitle",
+      $heading: "{{ group_name | string | to_json }}",
+    },
   })
   for (const group of [
     null,
@@ -74,7 +82,11 @@ test("grouped results validate types and retain number/string/boolean identities
   const sections = [0, "0", false, null, ["a"], { a: 1 }].map((value, i) => ({
     value,
     title: JSON.stringify(value),
-    heading: { type: "heading", heading_style: "subtitle", heading: JSON.stringify(value) },
+    heading: {
+      type: "heading",
+      heading_style: "subtitle",
+      heading: JSON.stringify(JSON.stringify(value)),
+    },
     matches: [{ entity: `light.item_${i}`, group: 0 }],
   }))
   const result = normalizeResult(sections, config)
@@ -321,11 +333,13 @@ test(
     assert.equal(output.status, 0, output.stderr)
     rendered<QuerySection[]>(output.stdout).forEach((actual, i) => {
       assert.deepEqual(
-        actual.result.map(({ value, title, matches }) => ({
-          value,
-          title,
-          entities: matches.map(({ entity }) => entity),
-        })),
+        normalizeResult(actual.result, normalizeConfig(cases[i][0])).sections!.map(
+          ({ value, title, matches }) => ({
+            value,
+            title,
+            entities: matches.map(({ entity }) => entity),
+          })
+        ),
         cases[i][1],
         JSON.stringify(cases[i][0])
       )

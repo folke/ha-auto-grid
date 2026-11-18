@@ -24,6 +24,7 @@ import type {
   GridConfig,
   Connection,
   HomeAssistant,
+  TemplateValue,
 } from "./types.ts"
 
 type YamlEditor = HTMLElement & { setValue: (value: unknown) => void }
@@ -210,7 +211,7 @@ export class AutoGridEditor extends LitElement {
               this.renderedCard = renderCardOptions(
                 plan.card,
                 plan.templates,
-                values as string[],
+                values as TemplateValue[],
                 match.entity
               )
             }

@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
 import { test } from "node:test"
-import { fieldTitle, fieldValue } from "../src/query.ts"
+import { fieldTitle, fieldValue, normalizeResult } from "../src/query.ts"
 import { normalizeConfig, rendered } from "./helpers.ts"
 
 const query = (include: unknown, extra: Record<string, unknown> = {}) =>
@@ -134,11 +134,19 @@ test(
         ],
       ],
       [
-        { include: selection, group: { by: "type", $heading: "{{ group_count }}" }, limit: 1 },
+        {
+          include: selection,
+          group: { by: "type", $heading: "{{ group_count | string | to_json }}" },
+          limit: 1,
+        },
         [section("light", "1", ["light.a"])],
       ],
       [
-        { include: selection, group: { by: "type", $heading: "{{ group_count }}" }, limit: 3 },
+        {
+          include: selection,
+          group: { by: "type", $heading: "{{ group_count | string | to_json }}" },
+          limit: 3,
+        },
         [
           section("light", "2", ["light.a", "light.b"]),
           section("sensor/battery", "2", ["sensor.battery"]),
@@ -148,11 +156,18 @@ test(
         {
           include: selection,
           exclude: { not: { type: "light" } },
-          group: { by: "type", $heading: "{{ group_count }}" },
+          group: { by: "type", $heading: "{{ group_count | string | to_json }}" },
         },
         [section("light", "1", ["light.a", "light.b"])],
       ],
-      [{ include: selection, group: { by: "type", $heading: "{{ group_count }}" }, limit: 0 }, []],
+      [
+        {
+          include: selection,
+          group: { by: "type", $heading: "{{ group_count | string | to_json }}" },
+          limit: 0,
+        },
+        [],
+      ],
     ]
     const configs = [...cases, ...grouped]
     const output = spawnSync(
@@ -177,7 +192,10 @@ test(
     )
     grouped.forEach(([config, expected], i) =>
       assert.deepEqual(
-        groupResults[cases.length + i].result.map(({ value, title, matches }) => ({
+        normalizeResult(
+          groupResults[cases.length + i].result,
+          normalizeConfig(config)
+        ).sections!.map(({ value, title, matches }) => ({
           value,
           title,
           entities: matches.map(({ entity }) => entity),
@@ -255,7 +273,10 @@ test(
     assert.equal(output.status, 0, output.stderr)
     rendered<QuerySection[]>(output.stdout).forEach((actual, i) =>
       assert.deepEqual(
-        actual.result.map(({ value, title }) => [value, title]),
+        normalizeResult(
+          actual.result,
+          normalizeConfig({ include, group: cases[i][0] })
+        ).sections!.map(({ value, title }) => [value, title]),
         cases[i][1]
       )
     )

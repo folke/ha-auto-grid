@@ -21,7 +21,8 @@ when that card has no template support of its own. Both cards ship in `auto-grid
 ## ✨ Features
 
 - **Template existing cards** — use Auto Card to render `$name`, `$icon`, nested
-  actions, and other string options through backend Jinja, without entity selection.
+  actions, and other options through backend Jinja, without entity selection. Results
+  can be text, numbers, booleans, lists, or objects.
 - **Automatic selection** — filter by area, label, device, entity type, state,
   attributes, and more. Combine include rules with global exclusions.
 - **Backend filtering** — Home Assistant evaluates selection instead of repeating
@@ -109,8 +110,9 @@ card:
        else 'Pool lights are off' }}
 ```
 
-`card` is the inner card, with no grid or selection required. Template results are
-strings; ordinary unprefixed Mushroom templates pass through unchanged. See the
+`card` is the inner card, with no grid or selection required. Template results retain
+data types; use `{{ value | string | to_json }}` to force text. Ordinary unprefixed
+Mushroom templates pass through unchanged. See the
 [Auto Card guide](docs/auto-card.md) for context, headings, and editor behavior.
 
 ## ⚙️ Configuration

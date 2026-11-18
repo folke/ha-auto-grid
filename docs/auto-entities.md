@@ -102,8 +102,8 @@ not JavaScript syntax, and not every field accepts wildcard/regex matching.
   `else` fallback cards and arbitrary `card_param` containers are not supported either.
 - **Templates opt in per option.** Use `$name`, `$icon`, or nested `$url_path` for
   Auto Grid's backend Jinja, with `entity` as the entity ID string. Ordinary Mushroom
-  templates pass through unchanged. Results are strings, not native objects or lists;
-  this is not a replacement for `filter.template`. See
+  templates pass through unchanged. Results can be typed lists/objects as well as
+  scalar values, but this is not an arbitrary `filter.template` selection engine. See
   [card-option templates](configuration.md#explicit-card-option-templates).
 - **Empty grids hide by default.** Set `show_empty: true` to keep a placeholder.
   A hidden empty grid remains subscribed so it can populate when entities match.

@@ -100,7 +100,7 @@ test("include overrides merge by destination key, while nested configuration rem
     () => render(dynamicType, { entity: "update.good", group: 0, values: [""] }),
     /card.type/
   )
-  for (const values of [undefined, [], [123, "b"], ["a", "b", "c"]])
+  for (const values of [undefined, [], [Infinity, "b"], ["a", "b", "c"]])
     assert.throws(() =>
       render(config, { entity: "update.good", group: 0, values: values as string[] | undefined })
     )

@@ -60,11 +60,20 @@ Each template is independent. A rendered `$entity` does not become `entity` or
 `config.entity` for sibling templates, and rendered options are never fed back into
 `config`. Define shared inputs as static card options or use HA helpers directly.
 
-**Results are strings with outer whitespace trimmed.** They are not parsed as JSON,
-numbers, booleans, lists, or objects. Mark string-valued leaves such as `$url_path`,
-not an entire action object. `name` and `$name` cannot coexist in the same object.
+**Results support native types:** numbers, booleans, `null`, lists, objects, and text.
+Both JSON and Jinja's Python-style data literals are decoded. Use `$features` for an
+entire list or `$tap_action` for an entire action object, as well as nested leaves.
+`name` and `$name` cannot coexist in the same object.
+
+To force text, use `{{ value | string | to_json }}`. JSON-encoded strings are decoded
+once, so numeric-looking text stays text, with quotes, backslashes, and newlines
+handled correctly. `| string` alone does not prevent numeric-looking output from
+being interpreted as a number. Nested strings inside returned lists/objects are
+not decoded again. Ordinary unprefixed options stay literal. See
+[template result types](configuration.md#template-result-types) for examples and limits.
+
 The child card must still accept the resulting configuration; Auto Card does not
-add template support inside a card's own implementation or change its option types.
+add template support inside a card's own implementation or relax its expected option types.
 
 ## Heading and layout
 

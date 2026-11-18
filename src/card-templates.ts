@@ -1,4 +1,5 @@
-import type { CardConfig, CardTemplate } from "./types.ts"
+import { isTemplateValue } from "./template-values.ts"
+import type { CardConfig, CardTemplate, TemplateValue } from "./types.ts"
 
 type Node = Record<string, unknown>
 
@@ -84,12 +85,12 @@ export function compileCardOptions(card: CardConfig): {
 export function renderCardOptions(
   card: CardConfig,
   templates: CardTemplate[],
-  values: string[] | undefined,
+  values: TemplateValue[] | undefined,
   entity?: string
 ): CardConfig {
   if (
     (values?.length ?? 0) !== templates.length ||
-    values?.some((value) => typeof value !== "string")
+    values?.some((value) => !isTemplateValue(value))
   ) {
     throw new Error("Invalid rendered card template values")
   }
@@ -100,7 +101,7 @@ export function renderCardOptions(
     Object.defineProperty(target, path.at(-1)!, {
       configurable: true,
       enumerable: true,
-      value: values![index],
+      value: structuredClone(values![index]),
       writable: true,
     })
   })

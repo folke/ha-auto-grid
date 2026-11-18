@@ -106,6 +106,7 @@ for case in payload:
         config_entry_id=lambda entity: case.get("registry", {}).get(entity, {}).get("config_entry_id"),
         config_entry_attr=config_entry_attr,
         states=states,
+        is_state=lambda entity, state: entity in states.values and states.values[entity].state == state,
         state_attr=lambda entity, attribute: states.values[entity].attributes.get(attribute),
         is_number=is_number,
         is_hidden_entity=lambda entity: case.get("registry", {}).get(entity, {}).get("hidden_by") is not None,

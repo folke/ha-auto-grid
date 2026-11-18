@@ -1131,6 +1131,7 @@
           section("Other", "Other", ["light.b"]),
         ]
         richSections[0].heading.icon = "mdi:pool"
+        richSections[1].heading.icon = ""
         richSections[0].heading.badges = [{ type: "entity", entity: "sensor.count" }]
         richSections[0].heading.heading_style = "title"
         subscriptions[headingIndex + 1].callback({ result: richSections })
@@ -1376,6 +1377,108 @@
           "empty Auto Card heading results release their reserved height"
         )
         typeCard.remove()
+        const typed = document.createElement("auto-card")
+        const typedIndex = subscriptions.length
+        const typedOptions = {
+          type: "custom:typed-card",
+          literal: "123",
+          $enabled: "{{ true }}",
+          $count: "{{ 123 }}",
+          $features: "{{ [{'type': 'toggle', 'enabled': false}] }}",
+          $tap_action: "{{ {'action': 'more-info', 'data': {'value': '[1]'}} }}",
+          $name: '{{ "123" | to_json }}',
+        }
+        typed.setConfig({
+          card: typedOptions,
+          heading: {
+            $heading: '{{ "123" | to_json }}',
+            $badges: "{{ [{'type': 'entity', 'entity': 'sensor.count'}] }}",
+          },
+        })
+        typed.hass = hass
+        document.body.append(typed)
+        const typedValues = [
+          "True",
+          "123",
+          "[{'type': 'toggle', 'enabled': False}]",
+          "{'action': 'more-info', 'data': {'value': '[1]'}}",
+          '"123"',
+        ]
+        subscriptions[typedIndex].callback({ result: typedValues })
+        subscriptions[typedIndex + 1].callback({
+          result: ['"123"', "[{'type': 'entity', 'entity': 'sensor.count'}]"],
+        })
+        await tick()
+        const typedInner = typed.shadowRoot.querySelector("test-tile")
+        const typedHeading = typed.shadowRoot.querySelector("test-heading")
+        assert(
+          typedInner.config.enabled === true &&
+            typedInner.config.count === 123 &&
+            typedInner.config.features[0].enabled === false &&
+            typedInner.config.tap_action.data.value === "[1]",
+          "Auto Card delivers native booleans, numbers, arrays and objects without decoding nested strings"
+        )
+        assert(
+          typedInner.config.name === "123" && typedInner.config.literal === "123",
+          "JSON string escaping forces text while ordinary config stays literal"
+        )
+        assert(
+          typedHeading.config.heading === "123" &&
+            Array.isArray(typedHeading.config.badges) &&
+            typedHeading.config.badges[0].entity === "sensor.count",
+          "headings support typed badge arrays and explicitly forced text"
+        )
+        const typedGrid = document.createElement("auto-grid")
+        const typedGridIndex = subscriptions.length
+        typedGrid.setConfig({
+          include: { entity: ["light.a", "light.b"] },
+          card: typedOptions,
+          group: {
+            by: "entity",
+            heading: {
+              $heading: '{{ "123" | to_json }}',
+              $badges: "{{ [{'type': 'entity', 'entity': 'sensor.count'}] }}",
+            },
+          },
+        })
+        typedGrid.hass = hass
+        document.body.append(typedGrid)
+        const typedSections = [
+          section("First", '"123"', ["light.a"]),
+          section("Second", '"123"', ["light.b"]),
+        ]
+        for (const entry of typedSections) {
+          entry.heading.badges = "[{'type': 'entity', 'entity': 'sensor.count'}]"
+          entry.matches[0].values = typedValues
+        }
+        subscriptions[typedGridIndex].callback({ result: typedSections })
+        await tick()
+        const typedTiles = [...typedGrid.shadowRoot.querySelectorAll("test-tile")]
+        assert(
+          typedTiles.length === 2 &&
+            typedTiles.every(
+              (card) =>
+                card.config.enabled === true &&
+                card.config.count === 123 &&
+                card.config.name === "123"
+            ),
+          "Auto Grid decodes the same typed option results once per match"
+        )
+        assert(
+          [...typedGrid.shadowRoot.querySelectorAll("test-heading")].every(
+            (card) => card.config.heading === "123" && Array.isArray(card.config.badges)
+          ),
+          "group headings decode typed options without parsing static fields"
+        )
+        typedTiles[0].config.features[0].enabled = "mutated"
+        assert(
+          typedTiles[1].config.features[0].enabled === false &&
+            typedInner.config.features[0].enabled === false,
+          "typed array results are cloned independently for each child"
+        )
+        typed.remove()
+        typedGrid.remove()
+        await tick()
         const slow = document.createElement("auto-card")
         slow.setConfig({ card: { type: "custom:slow-card", content: "Old" } })
         slow.hass = hass

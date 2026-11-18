@@ -63,7 +63,7 @@ export function restoreTemplateValues(
     Object.defineProperty(target, path.at(-1)!, {
       configurable: true,
       enumerable: true,
-      value: before[path.at(-1)!],
+      value: structuredClone(before[path.at(-1)!]),
       writable: true,
     })
   }
