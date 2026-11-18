@@ -363,6 +363,7 @@
         const section = (value, title, entities) => ({
           value,
           title,
+          heading: { type: "heading", heading_style: "subtitle", heading: title },
           matches: entities.map((entity) => ({ entity, group: 0 })),
         })
         const emitSections = (value) => subscriptions[4].callback({ result: value })
@@ -1072,6 +1073,120 @@
 
         observer.disconnect()
         grid.remove()
+        await tick()
+
+        const warned = document.createElement("auto-grid")
+        const warningIndex = subscriptions.length
+        warned.setConfig({ include: { entity_id: "light.warning" } })
+        warned.hass = hass
+        warned.preview = true
+        document.body.append(warned)
+        emit(warningIndex, ["light.warning"])
+        await tick()
+        assert(
+          warned.shadowRoot
+            .querySelector('ha-alert[alert-type="warning"]')
+            ?.textContent.includes("include[0].entity_id"),
+          "preview shows a path-specific warning"
+        )
+        const warnedTile = warned.shadowRoot.querySelector("test-tile")
+        assert(
+          warnedTile?.config.entity === "light.warning",
+          "warnings do not prevent rendering the actual card"
+        )
+        warned.preview = false
+        await tick()
+        assert(
+          !warned.shadowRoot.querySelector("ha-alert") &&
+            warned.shadowRoot.querySelector("test-tile") === warnedTile,
+          "dashboard hides warnings without replacing cards"
+        )
+        warned.preview = true
+        warned.setConfig({ include: { entity: "light.warning" } })
+        await tick()
+        assert(
+          !warned.shadowRoot.querySelector("ha-alert") &&
+            subscriptions.length === warningIndex + 1 &&
+            warned.shadowRoot.querySelector("test-tile") === warnedTile,
+          "correcting an alias clears warnings without resubscribing or rebuilding"
+        )
+        warned.remove()
+        await tick()
+
+        const templatedHeading = document.createElement("auto-grid")
+        const headingIndex = subscriptions.length
+        templatedHeading.setConfig({
+          include: { entity: ["light.a", "light.b"] },
+          heading: { heading: "{{ states('sensor.count') }}", $icon: "mdi:home" },
+          group: { by: "area", heading: { heading: "{{ group_name }}", $icon: "mdi:lightbulb" } },
+        })
+        templatedHeading.hass = hass
+        document.body.append(templatedHeading)
+        subscriptions[headingIndex].callback({ result: ["Overview", "mdi:home"] })
+        const richSections = [
+          section("Pool", "Pool", ["light.a"]),
+          section("Other", "Other", ["light.b"]),
+        ]
+        richSections[0].heading.icon = "mdi:pool"
+        richSections[0].heading.badges = [{ type: "entity", entity: "sensor.count" }]
+        richSections[0].heading.heading_style = "title"
+        subscriptions[headingIndex + 1].callback({ result: richSections })
+        await tick()
+        const renderedMain = templatedHeading.shadowRoot.querySelector(".card-header test-heading")
+        const renderedGroup = templatedHeading.shadowRoot.querySelector(
+          ".group-header test-heading"
+        )
+        assert(
+          renderedMain?.config.heading === "Overview" &&
+            renderedMain.config.icon === "mdi:home" &&
+            !("entity" in renderedMain.config),
+          "main heading templates render without an arbitrary entity context"
+        )
+        assert(
+          renderedGroup?.config.icon === "mdi:pool" &&
+            renderedGroup.config.heading_style === "title" &&
+            renderedGroup.config.badges[0].entity === "sensor.count",
+          "group headings accept the full native configuration"
+        )
+        const retainedHeadingTile = templatedHeading.shadowRoot.querySelector("test-tile")
+        const mainSetCount = renderedMain.setCount
+        const groupSetCount = renderedGroup.setCount
+        for (let i = 0; i < 30; i++) templatedHeading.hass = { ...hass, states: { generation: i } }
+        await tick()
+        assert(
+          renderedMain.setCount === mainSetCount && renderedGroup.setCount === groupSetCount,
+          "ordinary hass updates never reconfigure templated headings"
+        )
+        subscriptions[headingIndex].callback({ result: ["Updated", "mdi:home"] })
+        richSections[0].heading.icon = "mdi:lamp"
+        subscriptions[headingIndex + 1].callback({ result: richSections })
+        await tick()
+        assert(
+          templatedHeading.shadowRoot.querySelector(".card-header test-heading") === renderedMain &&
+            renderedMain.config.heading === "Updated" &&
+            renderedGroup.config.icon === "mdi:lamp" &&
+            templatedHeading.shadowRoot.querySelector("test-tile") === retainedHeadingTile,
+          "template changes reconfigure retained headings without replacing children"
+        )
+        richSections[0].heading.heading = ""
+        richSections[0].title = ""
+        richSections[1].heading.heading = ""
+        richSections[1].title = ""
+        richSections[1].heading.badges = [{ type: "entity", entity: "sensor.count" }]
+        subscriptions[headingIndex + 1].callback({ result: richSections })
+        await tick()
+        assert(
+          templatedHeading.shadowRoot.querySelectorAll(".group-header test-heading").length === 2,
+          "icon-only and badge-only group headings remain visible"
+        )
+        subscriptions[headingIndex + 1].callback({ result: [richSections[0]] })
+        await tick()
+        assert(
+          !templatedHeading.shadowRoot.querySelector(".group-header") &&
+            templatedHeading.shadowRoot.querySelector(".card-header test-heading") === renderedMain,
+          "rich group headings still disappear for a single group"
+        )
+        templatedHeading.remove()
         await tick()
         document.body.dataset.status = "passed"
         document.querySelector("#result").textContent = `Passed ${assertions} browser assertions`

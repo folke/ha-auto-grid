@@ -123,7 +123,7 @@ test(
       [
         {
           include: { type: "sensor" },
-          group: { by: "type", title: "{{ group_name }} / {{ group }} / {{ group_count }}" },
+          group: { by: "type", heading: "{{ group_name }} / {{ group }} / {{ group_count }}" },
         },
         [
           section("sensor/battery", "Battery / sensor/battery / 3", ["sensor.battery"]),
@@ -134,11 +134,11 @@ test(
         ],
       ],
       [
-        { include: selection, group: { by: "type", title: "{{ group_count }}" }, limit: 1 },
+        { include: selection, group: { by: "type", heading: "{{ group_count }}" }, limit: 1 },
         [section("light", "1", ["light.a"])],
       ],
       [
-        { include: selection, group: { by: "type", title: "{{ group_count }}" }, limit: 3 },
+        { include: selection, group: { by: "type", heading: "{{ group_count }}" }, limit: 3 },
         [
           section("light", "2", ["light.a", "light.b"]),
           section("sensor/battery", "2", ["sensor.battery"]),
@@ -148,11 +148,11 @@ test(
         {
           include: selection,
           exclude: { not: { type: "light" } },
-          group: { by: "type", title: "{{ group_count }}" },
+          group: { by: "type", heading: "{{ group_count }}" },
         },
         [section("light", "1", ["light.a", "light.b"])],
       ],
-      [{ include: selection, group: { by: "type", title: "{{ group_count }}" }, limit: 0 }, []],
+      [{ include: selection, group: { by: "type", heading: "{{ group_count }}" }, limit: 0 }, []],
     ]
     const configs = [...cases, ...grouped]
     const output = spawnSync(
@@ -227,7 +227,7 @@ test(
         ],
       ],
       [
-        { by: "type", title: "{{ group }}|{{ group_name }}" },
+        { by: "type", heading: "{{ group }}|{{ group_name }}" },
         [
           ["binary_sensor/carbon_monoxide", "binary_sensor/carbon_monoxide|Carbon Monoxide"],
           ["device_tracker", "device_tracker|Device Tracker"],

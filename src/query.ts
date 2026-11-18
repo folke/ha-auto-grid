@@ -1,9 +1,10 @@
 import { compileCardOptions, mergeCardOptions, validateCardOptions } from "./card-templates.ts"
-import { headingConfig } from "./heading.ts"
+import { compileHeadingOptions, headingConfig, validateHeading } from "./heading.ts"
 import type {
   AutoGridConfig,
   CardConfig,
   CardTemplate,
+  ConfigWarning,
   Filter,
   FilterField,
   GridConfig,
@@ -27,7 +28,7 @@ const fieldKeys = new Set<FilterField>([
   "device",
   "label",
   "domain",
-  "entity_id",
+  "entity",
   "type",
   "hidden",
   "state",
@@ -124,17 +125,62 @@ function membership(key: string, values: string[]): string {
   return `(${values.map((value) => `${key}_entities(${literal(value)})`).join(" + ")})`
 }
 
+function normalizeFilterAliases(
+  filter: unknown,
+  path: string,
+  warnings: ConfigWarning[],
+  depth = 0
+): void {
+  object(filter, "filter")
+  if (depth > 20) throw new Error("Filters may nest at most 20 levels")
+  const sourceKeys = new Map<string, string>()
+  for (const [alias, target] of [
+    ["entity_id", "entity"],
+    ["or", "any"],
+    ["and", "all"],
+  ] as const) {
+    if (!Object.hasOwn(filter, alias)) continue
+    const value = alias === "entity_id" ? strings(filter[alias], alias, true) : filter[alias]
+    if (Object.hasOwn(filter, target)) {
+      const current = alias === "entity_id" ? strings(filter[target], target, true) : filter[target]
+      if (JSON.stringify(current) !== JSON.stringify(value))
+        throw new Error(`${path}: conflicting ${target} and ${alias} values`)
+    } else {
+      filter[target] = filter[alias]
+      sourceKeys.set(target, alias)
+    }
+    delete filter[alias]
+    warnings.push({
+      code: `filter-${alias.replaceAll("_", "-")}-alias`,
+      message: `Accepted as an alias for ${target}. Prefer ${target} in new configurations.`,
+      path: `${path}.${alias}`,
+    })
+  }
+  for (const key of ["all", "any", "not"] as const) {
+    const children = filter[key]
+    if (children === undefined) continue
+    if (Array.isArray(children))
+      children.forEach((child, index) =>
+        normalizeFilterAliases(
+          child,
+          `${path}.${sourceKeys.get(key) ?? key}[${index}]`,
+          warnings,
+          depth + 1
+        )
+      )
+    else if (key === "not") normalizeFilterAliases(children, `${path}.not`, warnings, depth + 1)
+  }
+}
+
 function validateFilter(filter: Filter, depth = 0): void {
   object(filter, "filter")
   if (depth > 20) throw new Error("Filters may nest at most 20 levels")
   for (const [key, value] of Object.entries(filter)) {
     if (!isField(key) && !booleanKeys.has(key)) throw new Error(`Unknown filter rule: ${key}`)
     if (
-      ["area", "floor", "device", "label", "domain", "entity_id", "type", "integration"].includes(
-        key
-      )
+      ["area", "floor", "device", "label", "domain", "entity", "type", "integration"].includes(key)
     ) {
-      const values = strings(value, key, key === "entity_id")
+      const values = strings(value, key, key === "entity")
       if (key === "type" && values.some((v) => !/^[a-z0-9_]+(?:\/[a-z0-9_]+)?$/.test(v))) {
         throw new Error("type must be a domain or domain/device_class, not a pattern")
       }
@@ -172,7 +218,7 @@ function predicate(filter: Filter, sets: Map<string, string>): string {
           "or"
         )
       )
-    } else if (key === "entity_id") {
+    } else if (key === "entity") {
       expressions.push(
         join(
           strings(value, key, true).map((id) => matchOne("entity", id)),
@@ -232,8 +278,8 @@ function candidates(filter: Filter): { source: string; trackLifecycle: boolean }
     if (filter[key] !== undefined)
       return { source: membership(key, strings(filter[key], key)), trackLifecycle: true }
   }
-  if (filter.entity_id !== undefined) {
-    const ids = strings(filter.entity_id, "entity_id", true)
+  if (filter.entity !== undefined) {
+    const ids = strings(filter.entity, "entity", true)
     if (ids.every((id) => entityId.test(id)))
       return { source: JSON.stringify(ids), trackLifecycle: true }
   }
@@ -283,7 +329,7 @@ export function fieldValue(field: SortField, include: number): string {
     case "integration": {
       return "(config_entry_attr(config_entry_id(entity), 'domain') if config_entry_id(entity) is not none else none)"
     }
-    case "entity_id": {
+    case "entity": {
       return "entity"
     }
     case "name": {
@@ -347,6 +393,22 @@ function jinjaValue(value: unknown): string {
     .join(", ")}}`
 }
 
+function headingExpression(plan: ReturnType<typeof compileCardOptions>): string {
+  const paths = new Map(plan.templates.map(({ path }, index) => [JSON.stringify(path), index]))
+  const render = (value: unknown, path: (string | number)[]): string => {
+    const index = paths.get(JSON.stringify(path))
+    if (index !== undefined) return `ag_heading_values[${index}]`
+    if (Array.isArray(value))
+      return `[${value.map((child, i) => render(child, [...path, i])).join(", ")}]`
+    if (value && typeof value === "object")
+      return `{${Object.entries(value)
+        .map(([key, child]) => `${JSON.stringify(key)}: ${render(child, [...path, key])}`)
+        .join(", ")}}`
+    return jinjaValue(value)
+  }
+  return render(plan.card, [])
+}
+
 function compileQuery(
   includes: Filter[],
   excludes: Filter[],
@@ -356,6 +418,7 @@ function compileQuery(
   groupNames: (string | number)[],
   options: { context: Partial<CardConfig>; templates: CardTemplate[] }[]
 ): string {
+  const headingPlan = groupConfig ? compileHeadingOptions(groupConfig.heading) : undefined
   const sets = new Map<string, string>()
   const exclusion = join(
     excludes.map((filter) => predicate(filter, sets)),
@@ -460,7 +523,10 @@ function compileQuery(
   lines.push(`{% set ag_rows = ns.rows${limit === undefined ? "" : `[:${limit}]`} %}`)
   if (groupConfig) {
     lines.push(
-      `{% macro ag_title(entity_id, entity, group, group_name, group_count) -%}${groupConfig.title}{%- endmacro %}`,
+      ...headingPlan!.templates.map(
+        ({ source }, index) =>
+          `{% macro ag_heading_${index}(entity, config, area, group, group_name, group_count) -%}${source}{%- endmacro %}`
+      ),
       "{% set group_count = ag_rows | map(attribute='bucket_key') | unique(case_sensitive=true) | list | count %}",
       "{% set sections = namespace(rows=[], keys=[]) %}",
       "{% for row in ag_rows %}",
@@ -473,8 +539,10 @@ function compileQuery(
       ...matchLines("member"),
       "{% set members.rows = members.rows + [ag_match] %}",
       "{% endfor %}",
-      "{% set title = ag_title(row.entity, states[row.entity], group, group_name, group_count) | trim %}",
-      "{% set sections.rows = sections.rows + [{'key': row.bucket_key, 'value': group, 'title': title, 'matches': members.rows}] %}",
+      `{% set config = dict(${jinjaValue(headingPlan!.context)}, entity=row.entity) %}`,
+      `{% set ag_heading_values = [${headingPlan!.templates.map((_, index) => `(ag_heading_${index}(row.entity, config, config.get('area'), group, group_name, group_count) | trim)`).join(", ")}] %}`,
+      `{% set ag_heading = ${headingExpression(headingPlan!)} %}`,
+      "{% set sections.rows = sections.rows + [{'key': row.bucket_key, 'value': group, 'title': ag_heading.get('heading', ''), 'heading': ag_heading, 'matches': members.rows}] %}",
       "{% endif %}",
       "{% endfor %}",
       "{{ sections.rows }}"
@@ -576,8 +644,9 @@ function registryDependencies(
   excludes.forEach(filter)
   sorts.forEach((sort) => field(sort.by))
   if (group) field(group.by)
+  const headingTemplates = group ? compileHeadingOptions(group.heading).templates : []
   const custom =
-    Boolean(group && group.title !== "{{ group_name }}" && /{{|{%/.test(group.title)) ||
+    headingTemplates.some(({ source }) => source !== "{{ group_name }}" && /{{|{%/.test(source)) ||
     plans.some((plan) => plan.templates.some(({ source }) => /{{|{%/.test(source)))
   if (custom) allRegistries.forEach((kind) => result.add(kind))
   return allRegistries.filter((kind) => result.has(kind))
@@ -591,6 +660,8 @@ export function normalizeResult(value: unknown, config: GridConfig): QueryResult
   const sections = value.map((section) => {
     object(section, "Query section")
     if (typeof section.title !== "string") throw new Error("Group title must be a string")
+    object(section.heading, "Group heading")
+    const heading = validateHeading(section.heading as CardConfig)
     const key = groupKey(section.value)
     if (keys.has(key)) throw new Error("Duplicate group in query result")
     keys.add(key)
@@ -600,7 +671,7 @@ export function normalizeResult(value: unknown, config: GridConfig): QueryResult
       if (entities.has(row.entity)) throw new Error("Entity appears in multiple groups")
       entities.add(row.entity)
     }
-    return { key, matches, title: section.title, value: section.value as GroupValue }
+    return { heading, key, matches, title: section.title, value: section.value as GroupValue }
   })
   return { matches: sections.flatMap((section) => section.matches), sections }
 }
@@ -613,16 +684,24 @@ function filters<T extends Filter>(value: T | T[], name: string): T[] {
 
 function normalizeGroup(value: AutoGridConfig["group"]): GroupConfig | undefined {
   if (value === undefined || value === false) return undefined
-  if (value === true) return { by: "group", title: "{{ group_name }}" }
+  if (value === true) return normalizeGroup({ by: "group" })
   const group = typeof value === "string" ? { by: value } : value
   object(group, "group")
-  if (Object.keys(group).some((key) => !["by", "title"].includes(key)))
+  if ("title" in group) throw new Error("group.title is no longer supported; use group.heading")
+  if (Object.keys(group).some((key) => !["by", "heading"].includes(key)))
     throw new Error("Unknown group option")
   const by = group.by === undefined ? "group" : group.by
   if (by !== "group" && !isField(by)) throw new Error("Unknown group.by")
-  if (group.title !== undefined && typeof group.title !== "string")
-    throw new Error("group.title must be a string")
-  return { by, title: group.title ?? "{{ group_name }}" }
+  const heading = headingConfig(
+    {
+      heading:
+        group.heading === undefined
+          ? "{{ group_name }}"
+          : (group.heading as AutoGridConfig["heading"]),
+    },
+    "subtitle"
+  ) ?? { heading: "", heading_style: "subtitle", type: "heading" }
+  return { by, heading }
 }
 
 export function normalizeConfig(input: AutoGridConfig): GridConfig {
@@ -630,6 +709,7 @@ export function normalizeConfig(input: AutoGridConfig): GridConfig {
   // YAML may omit required fields despite the public TypeScript contract.
   const config: Partial<AutoGridConfig> = structuredClone(input)
   const heading = headingConfig(config)
+  const warnings: ConfigWarning[] = []
   for (const old of ["filter", "entities", "options"]) {
     if (old in config)
       throw new Error(`${old} is no longer supported; use include/exclude and card`)
@@ -663,12 +743,16 @@ export function normalizeConfig(input: AutoGridConfig): GridConfig {
     if (group !== undefined && typeof group !== "string")
       throw new Error("include.group must be a string")
     groupNames.push(group ?? index)
+    normalizeFilterAliases(filter, `include[${index}]`, warnings)
     validateFilter(filter)
     includeFilters.push(filter)
     if (override !== undefined) validateCardOptions(override)
     return mergeCardOptions(card, override ?? {})
   })
-  excludes.forEach((exclude) => validateFilter(exclude))
+  excludes.forEach((exclude, index) => {
+    normalizeFilterAliases(exclude, `exclude[${index}]`, warnings)
+    validateFilter(exclude)
+  })
   const plans = cards.map(compileCardOptions)
   const group = normalizeGroup(config.group)
   let sorts: (Sort | SortField)[] = defaultSort
@@ -699,5 +783,6 @@ export function normalizeConfig(input: AutoGridConfig): GridConfig {
     },
     show_empty: config.show_empty ?? false,
     square: config.square ?? false,
+    warnings,
   }
 }

@@ -96,7 +96,7 @@ test("sort strings and mixed lists compile identically to their expanded forms",
   const include = { domain: "sensor" }
   for (const by of [
     "group",
-    "entity_id",
+    "entity",
     "name",
     "state",
     "last_changed",
@@ -144,7 +144,7 @@ test("fieldValue supplies every sortable filter field and optional by defaults t
     "device",
     "label",
     "domain",
-    "entity_id",
+    "entity",
     "type",
     "hidden",
     "state",

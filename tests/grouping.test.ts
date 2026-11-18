@@ -16,14 +16,14 @@ test("group configuration normalizes shorthand and validates fields", () => {
   for (const group of [true, {}, { by: "group" }, "group"]) {
     assert.deepEqual(normalizeConfig({ include: selection, group }).query.group, {
       by: "group",
-      title: "{{ group_name }}",
+      heading: { type: "heading", heading_style: "subtitle", heading: "{{ group_name }}" },
     })
   }
   assert.equal(normalizeConfig({ include: selection }).query.group, undefined)
   assert.equal(normalizeConfig({ include: selection, group: false }).query.group, undefined)
   assert.deepEqual(normalizeConfig({ include: selection, group: "area" }).query.group, {
     by: "area",
-    title: "{{ group_name }}",
+    heading: { type: "heading", heading_style: "subtitle", heading: "{{ group_name }}" },
   })
   for (const group of [
     null,
@@ -54,6 +54,7 @@ test("grouped results validate types and retain number/string/boolean identities
   const sections = [0, "0", false, null, ["a"], { a: 1 }].map((value, i) => ({
     value,
     title: JSON.stringify(value),
+    heading: { type: "heading", heading_style: "subtitle", heading: JSON.stringify(value) },
     matches: [{ entity: `light.item_${i}`, group: 0 }],
   }))
   const result = normalizeResult(sections, config)
@@ -192,7 +193,7 @@ test(
         ],
       ],
       [
-        { include: selection, group: { by: "attr.complex", title: "Object" } },
+        { include: selection, group: { by: "attr.complex", heading: "Object" } },
         [
           section(firstObject, "Object", "light.a", "sensor.b"),
           section(secondObject, "Object", "light.c"),
@@ -214,7 +215,7 @@ test(
           include: selection,
           group: {
             by: "area",
-            title: "{{ group_name or 'Other' }}: {{ entity_id }} / {{ entity.name }}",
+            heading: "{{ group_name or 'Other' }}: {{ entity }} / {{ states[entity].name }}",
           },
         },
         [
@@ -226,7 +227,7 @@ test(
       [
         {
           include: selection,
-          group: { title: "{% if group == 'Lights' %}Lighting{% else %}Other{% endif %}" },
+          group: { heading: "{% if group == 'Lights' %}Lighting{% else %}Other{% endif %}" },
         },
         [
           section("Lights", "Lighting", "light.a", "light.c"),
@@ -234,7 +235,7 @@ test(
         ],
       ],
       [
-        { include: selection, group: { title: "" } },
+        { include: selection, group: { heading: "" } },
         [
           section("Lights", "", "light.a", "light.c"),
           section("Sensors", "", "sensor.b", "sensor.d", "sensor.e"),
@@ -310,5 +311,51 @@ test(
       )
       normalizeResult(actual.result, normalizeConfig(cases[i][0]))
     })
+  }
+)
+
+test(
+  "group headings render native options and nested $ properties with entity ID context",
+  { skip: python.status !== 0 },
+  () => {
+    const config = normalizeConfig({
+      include: { entity: ["light.a", "light.b"] },
+      sort: "entity",
+      group: {
+        by: "entity",
+        heading: {
+          heading: "{{ entity }} / {{ group_name }} / {{ states(entity) }} / {{ group_count }}",
+          $icon: "{{ 'mdi:lightbulb-on' if states(entity) == 'on' else 'mdi:lightbulb' }}",
+          heading_style: "title",
+          badges: [{ type: "entity", $entity: "{{ entity }}" }],
+          tap_action: { action: "url", $url_path: "{{ '/lights/' ~ entity }}" },
+        },
+      },
+    })
+    const output = spawnSync(
+      "python3",
+      [fileURLToPath(new URL("render-template.py", import.meta.url))],
+      {
+        encoding: "utf8",
+        input: JSON.stringify([
+          {
+            template: config.query.template,
+            states: { "light.a": { state: "on" }, "light.b": { state: "off" } },
+          },
+        ]),
+      }
+    )
+    assert.equal(output.status, 0, output.stderr)
+    const result = normalizeResult(rendered<QuerySection[]>(output.stdout)[0].result, config)
+    assert.deepEqual(result.sections![0].heading, {
+      heading: "light.a / light.a / on / 2",
+      heading_style: "title",
+      icon: "mdi:lightbulb-on",
+      type: "heading",
+      badges: [{ type: "entity", entity: "light.a" }],
+      tap_action: { action: "url", url_path: "/lights/light.a" },
+    })
+    assert.equal(result.sections![1].heading.icon, "mdi:lightbulb")
+    assert.equal(result.sections![1].heading.entity, undefined)
   }
 )

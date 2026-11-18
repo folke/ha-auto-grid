@@ -37,7 +37,7 @@ export interface Filter {
   device?: string | string[]
   label?: string | string[]
   domain?: string | string[]
-  entity_id?: string | string[]
+  entity?: string | string[]
   type?: string | string[]
   hidden?: boolean
   state?: Selection
@@ -59,12 +59,12 @@ export type SortField = Field
 
 export interface Group {
   by?: Field
-  title?: string
+  heading?: string | HeadingConfig
 }
 
 export interface GroupConfig {
   by: Field
-  title: string
+  heading: CardConfig
 }
 
 export interface Sort {
@@ -119,6 +119,7 @@ export interface QuerySection {
   key: string
   value: GroupValue
   title: string
+  heading: CardConfig
   matches: QueryMatch[]
 }
 
@@ -137,7 +138,14 @@ export interface CompiledQuery {
   group?: GroupConfig
 }
 
+export interface ConfigWarning {
+  code: string
+  path: string
+  message: string
+}
+
 export interface GridConfig {
+  warnings: ConfigWarning[]
   heading?: CardConfig
   columns: number | "auto"
   square: boolean

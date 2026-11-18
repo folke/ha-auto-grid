@@ -1,4 +1,5 @@
 import { normalizeResult } from "./query.ts"
+import { compileHeadingOptions, validateHeading } from "./heading.ts"
 import { renderCardOptions } from "./card-templates.ts"
 import { subscribeTemplate } from "./subscriptions.ts"
 import type {
@@ -13,7 +14,13 @@ import type {
 
 type CreateCard = (config: CardConfig) => Promise<LovelaceCard>
 type GridCard = QueryMatch & { card: LovelaceCard; configKey: string; cardType: string }
-export type GridSection = { key: string; value: GroupValue; title: string; cards: GridCard[] }
+export type GridSection = {
+  key: string
+  value: GroupValue
+  title: string
+  heading: CardConfig
+  cards: GridCard[]
+}
 
 export class GridController {
   cards: GridCard[] = []
@@ -21,11 +28,15 @@ export class GridController {
   private sectionSignature?: string
   loading = true
   error?: string
+  heading?: CardConfig
+  headingError?: string
 
   private config?: GridConfig
   private hass?: HomeAssistant
   private active = false
   private dispose?: () => void
+  private disposeHeading?: () => void
+  private headingToken = 0
   private revision = 0
   private subscriptionToken = 0
   private selection?: unknown
@@ -45,7 +56,9 @@ export class GridController {
     const cardsChanged =
       JSON.stringify([this.config?.query.cards, this.config?.query.templates]) !==
       JSON.stringify([config.query.cards, config.query.templates])
+    const headingChanged = JSON.stringify(this.config?.heading) !== JSON.stringify(config.heading)
     this.config = config
+    if (headingChanged) this.restartHeading()
     if (queryChanged) {
       this.selection = undefined
       this.restart()
@@ -62,17 +75,24 @@ export class GridController {
     if (this.active) {
       for (const { card } of this.cards) card.hass = hass
     }
-    if (connectionChanged) this.restart()
+    if (connectionChanged) {
+      this.restartHeading()
+      this.restart()
+    }
   }
 
   connect(): void {
     this.active = true
     if (this.hass) for (const { card } of this.cards) card.hass = this.hass
+    this.restartHeading()
     this.restart()
   }
 
   disconnect(): void {
     this.active = false
+    this.headingToken++
+    this.disposeHeading?.()
+    this.disposeHeading = undefined
     this.subscriptionToken++
     this.revision++
     this.dispose?.()
@@ -80,7 +100,67 @@ export class GridController {
   }
 
   retry(): void {
+    this.restartHeading()
     this.restart()
+  }
+
+  private restartHeading(): void {
+    const token = ++this.headingToken
+    this.disposeHeading?.()
+    this.disposeHeading = undefined
+    this.headingError = undefined
+    const plan = this.config?.heading ? compileHeadingOptions(this.config.heading) : undefined
+    this.heading = plan?.card
+    if (!plan?.templates.length || !this.active || !this.hass) {
+      this.changed()
+      return
+    }
+    const template = [
+      ...plan.templates.map(
+        ({ source }, index) => `{% macro ag_heading_${index}() -%}${source}{%- endmacro %}`
+      ),
+      `[${plan.templates.map((_, index) => `{{ ag_heading_${index}() | trim | to_json }}`).join(", ")}]`,
+    ].join("\n")
+    const valid = () => this.active && this.headingToken === token
+    const fail = (error: unknown) => {
+      if (!valid()) return
+      this.headingError = error instanceof Error ? error.message : String(error)
+      this.changed()
+    }
+    this.disposeHeading = subscribeTemplate(
+      this.hass.connection,
+      template,
+      {
+        error: fail,
+        refresh: () => {
+          if (!valid()) return
+          this.headingError = undefined
+          this.changed()
+        },
+        result: (values) => {
+          if (!valid()) return
+          try {
+            if (!Array.isArray(values) || values.some((value) => typeof value !== "string"))
+              throw new Error("Heading template values must be strings")
+            const heading = validateHeading(
+              renderCardOptions(plan.card, plan.templates, values as string[])
+            )
+            const changed =
+              this.headingError !== undefined ||
+              JSON.stringify(heading) !== JSON.stringify(this.heading)
+            this.heading = heading
+            this.headingError = undefined
+            if (changed) this.changed()
+          } catch (error) {
+            fail(error)
+          }
+        },
+      },
+      { config: plan.context },
+      {
+        registries: ["entity", "device", "area", "floor", "label", "integration"],
+      }
+    )
   }
 
   private restart(): void {
@@ -193,6 +273,7 @@ export class GridController {
     this.sectionSignature = signature
     this.sections = result.sections?.map((section) => ({
       cards: section.matches.map(({ entity }) => this.cache.get(entity)!),
+      heading: section.heading,
       key: section.key,
       title: section.title,
       value: section.value,

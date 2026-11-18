@@ -81,7 +81,7 @@ export function renderCardOptions(
   card: CardConfig,
   templates: CardTemplate[],
   values: string[] | undefined,
-  entity: string
+  entity?: string
 ): CardConfig {
   if (
     (values?.length ?? 0) !== templates.length ||
@@ -102,5 +102,5 @@ export function renderCardOptions(
   })
   if (typeof result.type !== "string" || !result.type.trim())
     throw new Error("Rendered card.type must be a non-empty string")
-  return { ...result, entity }
+  return entity === undefined ? result : { ...result, entity }
 }

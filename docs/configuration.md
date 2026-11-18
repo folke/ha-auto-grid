@@ -18,11 +18,10 @@ The complete YAML reference for `custom:auto-grid`.
 | `exclude`    | —                | A global exclusion filter or list                                         |
 | `card`       | `{ type: tile }` | Shared child-card configuration; `entity` is reserved                     |
 | `heading`    | —                | Native heading config or text shorthand; defaults to Title style          |
-| `title`      | —                | Compatibility text alias for `heading`; cannot be combined with it        |
 | `columns`    | `2`              | Positive integer for fixed columns, or `auto` for a single horizontal row |
 | `square`     | `false`          | Square cells, like the native grid card                                   |
 | `show_empty` | `false`          | Show loading/empty placeholders instead of hiding the grid                |
-| `group`      | `false`          | Boolean, field name, or `{ by, title }` for visual grouping               |
+| `group`      | `false`          | Boolean, field name, or `{ by, heading }` for visual grouping             |
 | `sort`       | `name`           | Sort string/object or mixed priority-ordered list; `[]` disables sorting  |
 | `limit`      | —                | Maximum results after sorting, before grouping                            |
 
@@ -74,6 +73,13 @@ visual editor fall back to YAML without changing saved configuration. Invalid
 card, selection, and layout drafts show inline errors and do not replace the last
 valid configuration.
 
+Safe compatibility conversions produce configuration warnings above the rendered
+card in preview, including the outer YAML editor. Each warning identifies the
+configuration path and explains the recovery. The card still renders, and warnings
+are hidden on the normal dashboard. Configuration is normalized internally without
+rewriting saved YAML. Unknown filter rules and ambiguous/conflicting values remain
+errors; Auto Grid does not guess misspellings or strip arbitrary child-card options.
+
 Use HA's outer **Show code editor** for other root fields, such as visibility or
 Styler settings. Inline editors preserve those fields.
 
@@ -112,17 +118,17 @@ include:
   - area: pool
     type: binary_sensor/problem
 exclude:
-  - entity_id: "*_diagnostic"
+  - entity: "*_diagnostic"
   - state: unavailable
 ```
 
-For explicit entities, use `entity_id`. These still go through the backend query,
-so the same sorting, exclusions, and include-group semantics apply:
+Use `entity` in filters, sorting, and grouping. Explicit entities still go through
+the backend query, so the same sorting, exclusions, and include-group semantics apply:
 
 ```yaml
 type: custom:auto-grid
 include:
-  entity_id:
+  entity:
     - light.pool
     - light.hall
 sort: []
@@ -133,21 +139,21 @@ selects every entity with a state. Be mindful of HA's rate limits for broad quer
 
 ### JSON entity lists
 
-`entity_id` also accepts a string containing a JSON array of non-empty strings:
+`entity` also accepts a string containing a JSON array of non-empty strings:
 
 ```yaml
 include:
-  entity_id: '["sensor.b", "sensor.a"]'
+  entity: '["sensor.b", "sensor.a"]'
 sort: []
 ```
 
 This is equivalent to a normal YAML list. Duplicates are removed, and `sort: []`
 preserves list order.
-Glob/regex entries still use normal matching. Empty lists (`entity_id: []` or `"[]"`)
+Glob/regex entries still use normal matching. Empty lists (`entity: []` or `"[]"`)
 select nothing; excluding an empty list removes nothing, and negating it matches all
 otherwise eligible entities.
 
-Only `entity_id` parses JSON this way. Strings starting with `[` after whitespace
+Only `entity` parses JSON this way. Strings starting with `[` after whitespace
 must be valid JSON arrays; malformed JSON and non-string/empty entries produce a
 configuration error. Python-style `['sensor.foo']` is not JSON—use `| to_json`.
 Other fields and `$` template output types are unchanged.
@@ -159,24 +165,24 @@ turning arbitrary card templates into native lists:
 type: custom:auto-grid
 columns: 1
 include:
-  entity_id: "pyscript.alert_*"
+  entity: "pyscript.alert_*"
 card:
   type: custom:auto-grid
   columns: 2
   sort: []
   include:
     # First, the alert itself
-    - $entity_id: "{{ entity }}"
+    - $entity: "{{ entity }}"
       card:
         type: tile
     # Then the related IDs, in their original order
-    - $entity_id: >-
+    - $entity: >-
         {{ state_attr(entity, 'entities') | default([], true) | to_json }}
       card:
         type: custom:mushroom-entity-card
 ```
 
-The outer grid resolves both `$entity_id` values in the parent entity's context. The
+The outer grid resolves both `$entity` values in the parent entity's context. The
 inner grid parses the resulting JSON string normally. Missing/empty `entities` leaves
 just the alert header.
 
@@ -192,7 +198,7 @@ the filters on the backend.
 | `device`       | Device ID or effective name; exact, wildcard, `/regex/`, or a list   |
 | `label`        | Label ID/name, or a list                                             |
 | `domain`       | Exact domain name, or a list, e.g. `light`                           |
-| `entity_id`    | Exact ID, wildcard, `/regex/`, native list, or JSON-array string     |
+| `entity`       | Exact ID, wildcard, `/regex/`, native list, or JSON-array string     |
 | `type`         | HA-style entity type: domain or domain/device_class, or a list       |
 | `hidden`       | Boolean; whether HA's entity registry marks the entity as hidden     |
 | `state`        | Exact value, wildcard, `/regex/`, numeric comparison, or a list      |
@@ -386,7 +392,7 @@ sort:
 ```
 
 Every filter field is also sortable: `area`, `floor`, `device`, `label`, `domain`,
-`entity_id`, `type`, `hidden`, `state`, `name`, `last_changed`, `last_updated`,
+`entity`, `type`, `hidden`, `state`, `name`, `last_changed`, `last_updated`,
 `integration`, and `attr.<name>`. The synthetic `group` field is the winning include's
 label or fallback index; it replaces the earlier `sort: include` spelling. Boolean operators `all`/`any`/`not` are not fields and cannot be sorted.
 
@@ -441,20 +447,34 @@ heading:
       entity: sensor.office_temperature
 ```
 
-The main heading defaults to `heading_style: title`; you can select `subtitle` in the
-native editor if preferred. Badges receive live `hass` updates normally. Heading text,
-icons, actions, and badges follow native HA behavior; Auto Grid `$` templates are not
-supported here. Use `group.title` for templated group labels and native badges for
-live values. An empty heading with no icon or badges takes no space.
+The main heading defaults to `heading_style: title`; you can select `subtitle` if
+preferred. Text containing `{{` or `{%` is automatically rendered as backend Jinja,
+in both the string shorthand and the `heading.heading` property. Explicit `$heading`
+is also supported. Other properties opt in with `$`, including nested action and
+badge options, following the same string-output rules as card-option templates:
 
-For compatibility, `title: Office` remains an alias for `heading: Office`. Do not set
-both. The visual editor writes `heading` when you edit a legacy title. Clearing a
-plain text heading removes either form; icon-only and badge-only headings remain
+```yaml
+heading:
+  heading: "Outdoor temperature: {{ states('sensor.outdoor_temperature') }} °C"
+  $icon: >-
+    {{ 'mdi:snowflake' if states('sensor.outdoor_temperature') | float(0) < 0
+       else 'mdi:thermometer' }}
+```
+
+Static headings need no template subscription. A templated main heading uses one
+shared subscription independently of selection, with `config` holding its static
+options; it has no implicit `entity` or group variables. Use explicit entity IDs
+with HA helpers. Badges receive live `hass` updates normally. An empty heading with
+no icon or badges takes no space. Headings with templates use YAML in the editor.
+
+Clearing a plain text heading removes it; icon-only and badge-only headings remain
 supported. The heading configuration does not affect entity selection.
 
-Group headings also use actual native heading cards, always with Subtitle style.
-Their text comes from the grouping field or `group.title`; their configuration is
-not exposed separately in the visual editor. A single group has no group heading.
+`group.heading` accepts the same string shorthand and native configuration as the
+main heading, including `$icon`, actions, and badges. Its only default-style
+difference is `heading_style: subtitle`. Group heading configuration is edited in
+Selection YAML. A single group has no group heading. The old `group.title` option
+has been removed; use `group.heading`.
 
 ## Grouping
 
@@ -473,12 +493,12 @@ include:
 group: true
 ```
 
-| `group`                      | Meaning                                             |
-| ---------------------------- | --------------------------------------------------- |
-| Omitted / `false`            | One grid without group headings                     |
-| `true` / `{}` / `group`      | Group by the winning include's group label or index |
-| `area` (or another field)    | Group by that field's value                         |
-| `{ by: area, title: "..." }` | Group by a field with a custom heading template     |
+| `group`                        | Meaning                                             |
+| ------------------------------ | --------------------------------------------------- |
+| Omitted / `false`              | One grid without group headings                     |
+| `true` / `{}` / `group`        | Group by the winning include's group label or index |
+| `area` (or another field)      | Group by that field's value                         |
+| `{ by: area, heading: "..." }` | Group by a field with a custom heading template     |
 
 ```yaml
 # Group lights by their resolved area name
@@ -513,9 +533,9 @@ that order. `sort: group` works even when visual grouping is disabled.
 
 ### Heading templates
 
-The default heading template is `{{ group_name }}`. A custom `group.title` is rendered
+The default heading text is `{{ group_name }}`. All `group.heading` templates render
 inside the existing backend query, not through a separate subscription per heading.
-It supports full Jinja, and the output is displayed as text, never HTML.
+Heading text supports full Jinja and is displayed as text, never HTML.
 
 Available variables:
 
@@ -528,20 +548,23 @@ Available variables:
   existing display values unchanged.
 - `group_count`: the total number of resulting groups after filtering, sorting, and
   the global limit (not the number of entities in this particular group).
-- `entity_id`: the first entity in the group after sorting and limiting.
-- `entity`: that entity's state object; use `entity_name(entity_id, fallback=true)` for
-  modern entity naming rather than its legacy `.name` property.
+- `entity`: the first entity ID string in the group after sorting and limiting,
+  with the same meaning as in card templates. Use `states(entity)`,
+  `state_attr(entity, 'attribute')`, or `states[entity]` for state access, and
+  `entity_name(entity, fallback=true)` for modern entity naming.
+- `config`: the heading's static options, with `entity` injected. `$` properties
+  are excluded, just as in card templates.
 
 ```yaml
 group:
   by: area
-  title: "{{ group_name or 'Unassigned' }}"
+  heading: "{{ group_name or 'Unassigned' }}"
 ```
 
 ```yaml
 group:
   by: label
-  title: "{{ group | join(', ') or 'Unlabelled' }}"
+  heading: "{{ group | join(', ') or 'Unlabelled' }}"
 ```
 
 Integration headings use friendly names when available, falling back to the raw
@@ -608,7 +631,7 @@ heading: Container Updates
 columns: 2
 include:
   type: update
-  entity_id: "update.wud_*"
+  entity: "update.wud_*"
   state: "on"
   attr.stack: "/.+/"
   attr.watcher:

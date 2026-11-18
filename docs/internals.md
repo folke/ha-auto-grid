@@ -23,9 +23,11 @@ YAML contract and examples, see [Configuration](configuration.md).
 ## 🔄 Performance and Lifecycle
 
 - One backend query returns entity IDs and winning include-rule indexes, optionally
-  with rendered `$` values and organized into typed groups with rendered titles.
+  with rendered `$` values and organized into typed groups with rendered heading configs.
   Static configuration remains frontend-only unless opted into template `config`
-  context. There are no per-heading or per-option template subscriptions.
+  context. Group headings share that query; there are no per-group or per-option
+  subscriptions. A templated main heading has one independent, shared subscription;
+  static main headings have none.
 - Identical generated queries share one subscription per HA connection, even when
   their frontend card configurations differ.
 - Ordinary `hass` updates only forward state to existing child cards. They do not run
@@ -137,8 +139,12 @@ queries scoped, and disconnecting the parent cleans up connected child consumers
 
 Main and group headings are actual native heading cards. They are retained and
 reconfigured only when their options change; ordinary `hass` updates are forwarded.
-The main heading is independent of the selection query. Group heading text is
-computed by `fieldTitle()` or a custom `group.title` template.
+The main heading is independent of the selection query. Group headings accept the same configuration as the main heading, defaulting to
+Subtitle instead of Title style. Text containing Jinja delimiters is implicitly
+templated; other properties use `$`. Group headings render in the selection query,
+with `entity` always an entity ID string. Main heading templates have no implicit
+entity/group context. They use the shared subscription machinery and registry
+invalidation, and disconnect with the card. Single-group headings remain hidden.
 
 Integration display names come from `manifest/list` and are cached per connection.
 Config-entry changes, loaded integrations, and reconnect snapshots invalidate the
@@ -166,3 +172,12 @@ Selection edits own only `include`, `exclude`, `group`, `sort`, and `limit`. Car
 own only the global `card`. Other root fields survive these changes. `$` properties
 force card-only YAML so native editors never receive unknown templated keys;
 ordinary Mushroom Jinja strings pass through untouched.
+
+## ⚠️ Configuration Warnings
+
+Normalization returns path-specific warnings with stable codes alongside usable
+configuration. Compatibility conversions operate on untrusted input, including
+nested boolean rules, before validating the canonical filter types. Equivalent
+configurations produce the same query without mutating input. Unknown rules and conflicting values still
+throw. Warnings render as a native warning alert only in preview mode, above the
+actual card, and are replaced on each configuration update—not on `hass` updates.

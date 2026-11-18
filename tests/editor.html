@@ -97,7 +97,14 @@
         const result = (config, entities) => {
           const matches = entities.map((entity) => ({ entity, group: 0 }))
           return config.group && matches.length
-            ? [{ value: "Office", title: "Office", matches }]
+            ? [
+                {
+                  value: "Office",
+                  title: "Office",
+                  heading: { type: "heading", heading_style: "subtitle", heading: "Office" },
+                  matches,
+                },
+              ]
             : config.group
               ? []
               : matches
@@ -569,6 +576,38 @@
           "editing a legacy title writes heading without leaving a conflicting alias"
         )
         legacy.remove()
+        await tick()
+        const headingTemplates = await makeEditor({
+          ...base,
+          heading: { heading: "{{ states('sensor.count') }}", $icon: "mdi:counter" },
+        })
+        const headingTemplateRoot = headingTemplates.editor.shadowRoot
+        const headingYaml = headingTemplateRoot.querySelector("ha-yaml-editor.heading-yaml")
+        assert(
+          headingYaml &&
+            !headingTemplateRoot.querySelector("hui-card-element-editor.heading-native"),
+          "templated headings use YAML rather than the native editor"
+        )
+        assert(
+          headingYaml.value.heading === "{{ states('sensor.count') }}" &&
+            headingYaml.value.$icon === "mdi:counter",
+          "heading YAML preserves implicit text templates and explicit $ keys"
+        )
+        assert(
+          headingTemplates.changes.length === 0,
+          "opening templated headings does not rewrite configuration"
+        )
+        emit(headingYaml, "value-changed", {
+          value: { ...headingYaml.value, $icon: "mdi:home" },
+          isValid: true,
+        })
+        await tick()
+        assert(
+          headingTemplates.changes.at(-1).heading.$icon === "mdi:home" &&
+            headingTemplates.changes.at(-1).heading.heading === "{{ states('sensor.count') }}",
+          "heading YAML edits retain both template forms"
+        )
+        headingTemplates.remove()
         await tick()
         document.body.dataset.status = "passed"
         document.querySelector("#result").textContent = `Passed ${assertions} browser assertions`

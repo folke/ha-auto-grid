@@ -405,6 +405,11 @@ export class AutoGridEditor extends LitElement {
   protected render() {
     if (!this.config || !this.hass) return nothing
     const templates = hasCardTemplates(this.config.card)
+    const heading = headingEditorValue(this.config)
+    const headingTemplates =
+      hasCardTemplates(heading) ||
+      (typeof heading.heading === "string" && /{{|{%/.test(heading.heading))
+    const headingCode = this.headingCode || headingTemplates
     const nativeAvailable = !!customElements.get("hui-card-element-editor")
     const code = this.codeMode
     let cardHint: TemplateResult | typeof nothing = nothing
@@ -438,18 +443,18 @@ export class AutoGridEditor extends LitElement {
         html`
           <div class="toolbar">
             <button
-              ?disabled=${!nativeAvailable || (this.headingCode && !!this.headingError)}
+              ?disabled=${!nativeAvailable || headingTemplates || (this.headingCode && !!this.headingError)}
               @click=${() => {
                 this.headingCode = !this.headingCode
                 this.headingError = undefined
                 this.requestUpdate()
               }}
             >
-              ${this.headingCode ? "Visual editor" : "Heading YAML"}
+              ${headingCode ? "Visual editor" : "Heading YAML"}
             </button>
           </div>
           ${
-            this.headingCode
+            headingCode
               ? html`<ha-yaml-editor
                   class="heading-yaml"
                   .hass=${this.hass}
@@ -466,6 +471,7 @@ export class AutoGridEditor extends LitElement {
                   @config-changed=${this.changeHeading}
                 ></hui-card-element-editor>`
           }
+          ${headingTemplates ? html`<p class="hint">This heading uses templates. Edit its YAML to preserve them.</p>` : nothing}
           ${this.headingError ? html`<p class="error" role="alert">${this.headingError}</p>` : nothing}
         `
       )}

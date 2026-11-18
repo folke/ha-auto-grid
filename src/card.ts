@@ -113,19 +113,20 @@ export class AutoGrid extends LitElement {
       this.config?.show_empty === false &&
       !this.currentPreview &&
       !this.grid.error &&
+      !this.grid.headingError &&
       !this.headingError &&
       !this.grid.cards.length
     )
   }
 
   private get headingError(): string | undefined {
-    if (visibleHeading(this.config?.heading) && this.headings.get("main")?.error)
+    if (visibleHeading(this.grid.heading) && this.headings.get("main")?.error)
       return this.headings.get("main")!.error
     const sections = this.grid.sections ?? []
     if (sections.length > 1)
       for (const section of sections) {
         const error = this.headings.get(`group:${section.key}`)?.error
-        if (section.title && error) return error
+        if (visibleHeading(section.heading) && error) return error
       }
     return undefined
   }
@@ -133,20 +134,15 @@ export class AutoGrid extends LitElement {
   private syncHeadings(): void {
     const desired = new Map<string, CardConfig>()
     const known = new Set<string>()
-    if (visibleHeading(this.config?.heading)) {
+    if (visibleHeading(this.grid.heading)) {
       known.add("main")
-      desired.set("main", this.config!.heading!)
+      desired.set("main", this.grid.heading!)
     }
     const sections = this.grid.sections ?? []
     for (const section of sections) {
       const key = `group:${section.key}`
       known.add(key)
-      if (sections.length > 1 && section.title)
-        desired.set(key, {
-          heading: section.title,
-          heading_style: "subtitle",
-          type: "heading",
-        })
+      if (sections.length > 1 && visibleHeading(section.heading)) desired.set(key, section.heading)
     }
     for (const key of this.headings.keys()) if (!known.has(key)) this.headings.delete(key)
     for (const [key, config] of desired) {
@@ -219,7 +215,7 @@ export class AutoGrid extends LitElement {
   async getCardSize(): Promise<number> {
     const configuredColumns = this.config?.columns ?? 2
     const cards = this.grid.cards
-    const sections = this.grid.sections ?? [{ cards, title: "" }]
+    const sections = this.grid.sections ?? [{ cards, heading: undefined, title: "" }]
     const sizes = await Promise.all(
       cards.map(async ({ card }) => {
         try {
@@ -234,13 +230,17 @@ export class AutoGrid extends LitElement {
     for (const section of sections) {
       const columns =
         configuredColumns === "auto" ? Math.max(1, section.cards.length) : configuredColumns
-      if (sections.length > 1 && section.title) size++
+      if (sections.length > 1 && visibleHeading(section.heading)) size++
       const heights = section.cards.map(({ entity }) => byEntity.get(entity) ?? 1)
       for (let i = 0; i < heights.length; i += columns)
         size += Math.max(...heights.slice(i, i + columns))
     }
     const contentSize = size || (this.hideEmpty ? 0 : 1)
-    return contentSize + (contentSize && visibleHeading(this.config?.heading) ? 1 : 0)
+    return (
+      contentSize +
+      (contentSize && visibleHeading(this.grid.heading) ? 1 : 0) +
+      (this.currentPreview && this.config?.warnings.length ? 1 : 0)
+    )
   }
 
   getGridOptions(): { columns: number; rows: string; min_columns: number } {
@@ -250,14 +250,22 @@ export class AutoGrid extends LitElement {
   protected render() {
     if (this.hideEmpty) return nothing
     return html`${
-      visibleHeading(this.config?.heading)
+      this.currentPreview && this.config?.warnings.length
+        ? html`<ha-alert alert-type="warning" title="Configuration warnings">
+            <ul>
+              ${this.config.warnings.map((warning) => html`<li><code>${warning.path}</code>: ${warning.message}</li>`)}
+            </ul>
+          </ha-alert>`
+        : nothing
+    }${
+      visibleHeading(this.grid.heading)
         ? html`<div class="card-header">${this.headings.get("main")?.card ?? nothing}</div>`
         : nothing
     }${this.renderContent()}`
   }
 
   private renderContent() {
-    const error = this.grid.error ?? this.headingError
+    const error = this.grid.error ?? this.grid.headingError ?? this.headingError
     if (error) {
       return html`<ha-card
         ><div class="message" role="alert">
@@ -283,13 +291,21 @@ export class AutoGrid extends LitElement {
         </div></ha-card
       >`
     }
-    const sections = this.grid.sections ?? [{ cards: this.grid.cards, key: "ungrouped", title: "" }]
+    const sections = this.grid.sections ?? [
+      {
+        cards: this.grid.cards,
+        heading: { type: "heading" },
+        key: "ungrouped",
+        title: "",
+        value: null,
+      },
+    ]
     return html`${repeat(
       sections,
       ({ key }) => key,
       (section) =>
         html` <section class="section">
-          ${sections.length > 1 && section.title ? html`<div class="group-header">${this.headings.get(`group:${section.key}`)?.card ?? nothing}</div>` : nothing}
+          ${sections.length > 1 && visibleHeading(section.heading) ? html`<div class="group-header">${this.headings.get(`group:${section.key}`)?.card ?? nothing}</div>` : nothing}
           <div
             class="grid"
             style=${this.config?.columns === "auto" ? `--auto-grid-columns: ${section.cards.length}` : nothing}
@@ -311,6 +327,14 @@ export class AutoGrid extends LitElement {
     :host([empty]) {
       /* Parent grids can force display:block on children across the shadow boundary. */
       display: none !important;
+    }
+    ha-alert {
+      display: block;
+      margin-bottom: var(--auto-grid-gap, var(--grid-card-gap, 8px));
+    }
+    ha-alert ul {
+      margin: 0;
+      padding-left: 20px;
     }
     .card-header {
       margin-bottom: var(--auto-grid-gap, var(--grid-card-gap, 8px));

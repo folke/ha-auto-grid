@@ -17,7 +17,7 @@ and stop maintaining lists of entities by hand.
 - **Your cards, your options** — native tiles by default, custom entity cards when
   you want them. Share settings globally and override them per include rule.
 - **Groups and headings** — organize cards by area, device, type, or another field,
-  with native heading cards and optional Jinja titles.
+  with native heading cards and templated text, icons, actions, and badges.
 - **Explicit templates** — opt individual card options into Jinja with `$` keys,
   without interfering with templates owned by Mushroom or other cards.
 - **Native visual editing** — configure the grid, heading, and child card with
@@ -95,11 +95,10 @@ include wins, each entity appears once, and `exclude` removes matches globally.
 | `exclude`    | —                | A global exclusion filter or list                                         |
 | `card`       | `{ type: tile }` | Shared child-card configuration; `entity` is reserved                     |
 | `heading`    | —                | Native heading config or text shorthand; defaults to Title style          |
-| `title`      | —                | Compatibility text alias for `heading`; cannot be combined with it        |
 | `columns`    | `2`              | Positive integer for fixed columns, or `auto` for a single horizontal row |
 | `square`     | `false`          | Square cells, like the native grid card                                   |
 | `show_empty` | `false`          | Show loading/empty placeholders instead of hiding the grid                |
-| `group`      | `false`          | Boolean, field name, or `{ by, title }` for visual grouping               |
+| `group`      | `false`          | Boolean, field name, or `{ by, heading }` for visual grouping             |
 | `sort`       | `name`           | Sort string/object or mixed priority-ordered list; `[]` disables sorting  |
 | `limit`      | —                | Maximum results after sorting, before grouping                            |
 
@@ -128,7 +127,10 @@ selection rule. Use HA's outer code editor for other root options such as visibi
 or Styler settings. Invalid drafts leave the last valid configuration intact.
 
 Cards with `$` properties use card-only YAML to preserve templates. Unsupported
-visual editors fall back to YAML. No additional editor resource is needed.
+visual editors fall back to YAML. Heading text automatically evaluates Jinja-looking
+strings; other heading options use `$` to opt in. Safe compatibility conversions
+show warnings above the preview without preventing rendering or rewriting saved YAML.
+No additional editor resource is needed.
 
 ## 📚 Examples
 

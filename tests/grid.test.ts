@@ -370,6 +370,7 @@ test("group title and membership changes preserve cards and update sections", as
   const section = (value: unknown, title: string, entities: string[]) => ({
     value,
     title,
+    heading: { type: "heading", heading_style: "subtitle", heading: title },
     matches: entities.map((entity) => ({ entity, group: 0 })),
   })
   f.emit([section("Pool", "Pool", ["light.a"]), section("Other", "Other", ["light.b"])])
@@ -401,7 +402,14 @@ test("grouped card configuration changes use the retained raw selection", async 
   const config = { include: { domain: "light" }, group: true }
   f.grid.configure(normalizeConfig(config))
   f.grid.connect()
-  f.emit([{ value: 0, title: "0", matches: [{ entity: "light.a", group: 0 }] }])
+  f.emit([
+    {
+      value: 0,
+      title: "0",
+      heading: { type: "heading", heading_style: "subtitle", heading: "0" },
+      matches: [{ entity: "light.a", group: 0 }],
+    },
+  ])
   await tick()
   f.grid.configure(normalizeConfig({ ...config, card: { type: "button" } }))
   await tick()
@@ -530,5 +538,83 @@ test("stale asynchronous selections cannot reconfigure retained cards", async ()
   assert.deepEqual(a.updates, ["latest"])
   assert.equal(a.config.name, "latest")
   assert.equal(f.grid.cards.length, 1)
+  f.grid.disconnect()
+})
+
+test("main heading templates are shared independently of selection and release on disconnect", async () => {
+  const f = fixture()
+  const config = normalizeConfig({
+    include: { entity: "light.a" },
+    heading: { heading: "{{ states('sensor.count') }}", $icon: "mdi:lightbulb" },
+  })
+  f.grid.configure(config)
+  const other = new GridController(
+    async (card) => testCard(card),
+    () => {}
+  )
+  other.configure(config)
+  other.setHass(f.hass)
+  f.grid.connect()
+  other.connect()
+  assert.equal(f.subscriptions.length, 2)
+  const heading = f.subscriptions[0]
+  assert.match(heading.request.template as string, /ag_heading_0/)
+  assert.doesNotMatch(heading.request.template as string, /for entity|group_count/)
+  heading.callback({ result: ["Three", "mdi:lightbulb"] })
+  f.emit(["light.a"])
+  await tick()
+  assert.deepEqual(f.grid.heading, {
+    heading: "Three",
+    heading_style: "title",
+    icon: "mdi:lightbulb",
+    type: "heading",
+  })
+  assert.deepEqual(other.heading, f.grid.heading)
+  assert.equal(Object.hasOwn(f.grid.heading, "entity"), false)
+  const updates = f.updates
+  for (let i = 0; i < 30; i++) f.grid.setHass({ ...f.hass, states: { generation: i } })
+  heading.callback({ result: ["Three", "mdi:lightbulb"] })
+  assert.equal(f.updates, updates)
+  heading.callback({ error: "Template failed" })
+  assert.equal(f.grid.headingError, "Template failed")
+  heading.callback({ result: ["Four", "mdi:lamp"] })
+  assert.equal(f.grid.headingError, undefined)
+  assert.equal(f.grid.heading.heading, "Four")
+  f.grid.disconnect()
+  await tick()
+  assert.equal(f.stops, 0)
+  other.disconnect()
+  await tick()
+  assert.equal(f.stops, 2)
+  heading.callback({ result: ["Stale", "mdi:lamp"] })
+  assert.equal(f.grid.heading.heading, "Four")
+})
+
+test("main heading edits never reopen selection; static headings need no subscription", async () => {
+  const f = fixture()
+  f.grid.configure(normalizeConfig({ include: { domain: "light" }, heading: "Static" }))
+  f.grid.connect()
+  f.emit(["light.a"])
+  await tick()
+  const card = f.grid.cards[0].card
+  assert.equal(f.subscriptions.length, 1)
+  f.grid.configure(
+    normalizeConfig({
+      include: { domain: "light" },
+      heading: { $heading: "{{ states('sensor.count') }}" },
+    })
+  )
+  assert.equal(f.subscriptions.length, 2)
+  const dynamic = f.subscriptions[1]
+  dynamic.callback({ result: ["Dynamic"] })
+  assert.equal(f.grid.heading!.heading, "Dynamic")
+  dynamic.callback({ result: [false] })
+  assert.match(f.grid.headingError!, /must be strings/)
+  f.grid.configure(normalizeConfig({ include: { domain: "light" }, heading: "Static again" }))
+  dynamic.callback({ result: ["Stale"] })
+  assert.equal(f.grid.heading!.heading, "Static again")
+  assert.equal(f.grid.headingError, undefined)
+  assert.equal(f.grid.cards[0].card, card)
+  assert.equal(f.subscriptions.length, 2)
   f.grid.disconnect()
 })
