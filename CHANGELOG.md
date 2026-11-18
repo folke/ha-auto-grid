@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.2.0](https://github.com/folke/ha-auto-grid/compare/v0.1.1...v0.2.0) (2026-11-18)
+
+
+### Features
+
+* add Auto Card and shared template-aware option editing ([b104ce2](https://github.com/folke/ha-auto-grid/commit/b104ce29fd774e0f9c3756ae162ab73e4e66460c))
+* add responsive columns with pixel minimum widths ([cf93c97](https://github.com/folke/ha-auto-grid/commit/cf93c971f2b8d08f39268b7f4253b8790167ff61))
+* unify heading templates and canonical entity configuration ([b0821b3](https://github.com/folke/ha-auto-grid/commit/b0821b367eda443ae2ed374dd86e0f91b2f575b2))
+
+
+### Bug Fixes
+
+* remove implicit area variable from template context ([0a5f55c](https://github.com/folke/ha-auto-grid/commit/0a5f55cdc4eb75e5ae18d209a6ebb5c27f507d44))
+* retry shared template subscriptions and streamline single-include queries ([c717ce8](https://github.com/folke/ha-auto-grid/commit/c717ce843858cea6aff3c309f3229545888290bb))
+
 ## [0.1.1](https://github.com/folke/ha-auto-grid/compare/v0.1.0...v0.1.1) (2026-11-17)
 
 
