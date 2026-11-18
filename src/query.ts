@@ -1,3 +1,4 @@
+import { normalizeColumns } from "./layout.ts"
 import { compileCardOptions, mergeCardOptions, validateCardOptions } from "./card-templates.ts"
 import { compileHeadingOptions, headingConfig, validateHeading } from "./heading.ts"
 import type {
@@ -715,13 +716,7 @@ export function normalizeConfig(input: AutoGridConfig): GridConfig {
     if (old in config)
       throw new Error(`${old} is no longer supported; use include/exclude and card`)
   }
-  if (
-    config.columns !== undefined &&
-    config.columns !== "auto" &&
-    (!Number.isInteger(config.columns) || config.columns < 1)
-  ) {
-    throw new Error('columns must be a positive integer or "auto"')
-  }
+  const columns = normalizeColumns(config.columns)
   if (config.limit !== undefined && (!Number.isInteger(config.limit) || config.limit < 0)) {
     throw new Error("limit must be a non-negative integer")
   }
@@ -765,7 +760,7 @@ export function normalizeConfig(input: AutoGridConfig): GridConfig {
   })
   return {
     card,
-    columns: config.columns ?? 2,
+    columns,
     heading,
     query: {
       cards: plans.map((plan) => plan.card),

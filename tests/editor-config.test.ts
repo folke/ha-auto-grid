@@ -94,12 +94,27 @@ test("layout edits preserve queries and avoid materializing unrelated defaults",
   assert.deepEqual(next.card, config.card)
   assert.deepEqual(next.include, config.include)
   assert.equal(updateLayout(config, { columns: "auto" }).columns, "auto")
+  assert.equal(updateLayout(config, { columns: "all" }).columns, "all")
+  assert.equal(updateLayout(config, { columns: "180px" }).columns, "180px")
   assert.equal(updateLayout(config, { columns: "4" }).columns, 4)
   assert.equal(updateLayout(config, { columns: 4 }).columns, 4)
   assert.equal(updateLayout(config, { square: true }).square, true)
   assert.equal(updateLayout(config, { show_empty: true }).show_empty, true)
   assert.equal(updateLayout({ ...config, columns: 5 }, { columns: "" }).columns, undefined)
-  for (const columns of ["0", "-1", "1.5", "fill", "NaN", false, [], {}])
+  for (const columns of [
+    "0",
+    "-1",
+    "1.5",
+    "25",
+    "180",
+    "0px",
+    "1rem",
+    "fill",
+    "NaN",
+    false,
+    [],
+    {},
+  ])
     assert.throws(() => updateLayout(config, { columns }))
   assert.throws(() => updateLayout(config, { square: "true" }))
   assert.throws(() => updateLayout(config, { show_empty: null }))

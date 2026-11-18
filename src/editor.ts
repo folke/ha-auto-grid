@@ -431,7 +431,7 @@ export class AutoGridEditor extends LitElement {
             .schema=${layoutSchema}
             .data=${this.layoutValue ?? layoutData(this.config)}
             .computeLabel=${(field: { name: string }) => labels[field.name] ?? field.name}
-            .computeHelper=${(field: { name: string }) => (field.name === "columns" ? 'A positive number, or "auto" for one horizontal row.' : "")}
+            .computeHelper=${(field: { name: string }) => (field.name === "columns" ? "auto: wrap at 140px · all: one row · 1–24: fixed count · e.g. 180px: wrap at that minimum width" : "")}
             @value-changed=${this.changeLayout}
           ></ha-form>
           ${this.layoutError ? html`<p class="error" role="alert">${this.layoutError}</p>` : nothing}

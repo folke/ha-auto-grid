@@ -235,6 +235,7 @@
         const layout = root.querySelector("ha-form")
         assert(
           layout.schema[0].name === "columns" &&
+            !!layout.schema[0].selector.text &&
             layout.schema[1].type === "grid" &&
             layout.schema[1].schema.length === 2,
           "Grid controls use a compact form"
@@ -244,8 +245,9 @@
           "empty control has the concise label"
         )
         assert(
-          layout.computeHelper({ name: "columns" }).includes("auto") &&
-            layout.computeHelper({ name: "title" }) === "",
+          ["auto", "all", "1–24", "180px"].every((value) =>
+            layout.computeHelper({ name: "columns" }).includes(value)
+          ) && layout.computeHelper({ name: "title" }) === "",
           "column help belongs to its own field"
         )
         emit(native, "config-changed", { config: native.value, guiModeAvailable: true })
@@ -341,7 +343,7 @@
         await tick()
         assert(
           changes.length === saved &&
-            content.querySelector('[role="alert"]').textContent.includes("Columns"),
+            content.querySelector('[role="alert"]').textContent.includes("columns"),
           "invalid layout stays local"
         )
         emit(layout, "value-changed", { value: { ...layout.data, columns: "3" } })
@@ -350,6 +352,25 @@
           changes.at(-1).columns === 3 && !content.querySelector('[role="alert"]'),
           "valid layout recovers"
         )
+        emit(layout, "value-changed", { value: { ...layout.data, columns: "180px" } })
+        await tick()
+        assert(
+          changes.at(-1).columns === "180px",
+          "Columns text field saves pixel widths as strings"
+        )
+        emit(layout, "value-changed", { value: { ...layout.data, columns: "all" } })
+        await tick()
+        assert(changes.at(-1).columns === "all", "Columns text field accepts single-row mode")
+        const beforeOversizedColumns = changes.length
+        emit(layout, "value-changed", { value: { ...layout.data, columns: "180" } })
+        await tick()
+        assert(
+          changes.length === beforeOversizedColumns &&
+            content.querySelector('[role="alert"]').textContent.includes("180px"),
+          "oversized counts show an inline pixel-width hint without saving"
+        )
+        emit(layout, "value-changed", { value: { ...layout.data, columns: "3" } })
+        await tick()
         const selectionWrites = selection.writes
         const selectionSaved = changes.length
         emit(selection, "value-changed", {

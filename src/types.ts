@@ -80,11 +80,13 @@ export type HeadingConfig = Partial<CardConfig> & {
   badges?: unknown[]
 }
 
+export type Columns = number | "auto" | "all" | `${number}px`
+
 export interface AutoGridConfig {
   type?: string
   heading?: string | HeadingConfig
   title?: string
-  columns?: number | "auto"
+  columns?: Columns | `${number}`
   square?: boolean
   show_empty?: boolean
   card?: Partial<CardConfig>
@@ -147,7 +149,7 @@ export interface ConfigWarning {
 export interface GridConfig {
   warnings: ConfigWarning[]
   heading?: CardConfig
-  columns: number | "auto"
+  columns: Columns
   square: boolean
   show_empty: boolean
   card: CardConfig

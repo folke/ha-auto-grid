@@ -4,6 +4,7 @@ import { GridController } from "./grid.ts"
 import { AutoGridEditor, prepareEditor } from "./editor.ts"
 import { normalizeConfig } from "./query.ts"
 import { visibleHeading } from "./heading.ts"
+import { minimumWidth } from "./layout.ts"
 import type {
   AutoGridConfig,
   CardConfig,
@@ -36,6 +37,8 @@ export class AutoGrid extends LitElement {
   private currentLayout?: string
   private sizeUpdate = 0
   private reportedSize = 0
+  private resizeObserver?: ResizeObserver
+  private observedGrids = new Map<Element, number>()
   private headings = new Map<string, HeadingEntry>()
   private grid = new GridController(
     async (config) => {
@@ -59,8 +62,12 @@ export class AutoGrid extends LitElement {
 
   setConfig(config: AutoGridConfig): void {
     this.config = normalizeConfig(config)
-    if (this.config.columns === "auto") this.style.removeProperty("--auto-grid-columns")
-    else this.style.setProperty("--auto-grid-columns", String(this.config.columns))
+    if (typeof this.config.columns === "number")
+      this.style.setProperty("--auto-grid-columns", String(this.config.columns))
+    else this.style.removeProperty("--auto-grid-columns")
+    const width = minimumWidth(this.config.columns)
+    if (width === undefined) this.style.removeProperty("--auto-grid-min-width")
+    else this.style.setProperty("--auto-grid-min-width", `${width}px`)
     this.toggleAttribute("square", this.config.square)
     this.grid.configure(this.config)
     this.gridChanged()
@@ -99,6 +106,9 @@ export class AutoGrid extends LitElement {
   }
 
   disconnectedCallback(): void {
+    this.resizeObserver?.disconnect()
+    this.observedGrids.clear()
+    this.sizeUpdate++
     for (const [key, entry] of this.headings) if (!entry.card) this.headings.delete(key)
     this.grid.disconnect()
     super.disconnectedCallback()
@@ -196,6 +206,10 @@ export class AutoGrid extends LitElement {
         })
       )
     this.requestUpdate()
+    this.reportSize()
+  }
+
+  private reportSize(): void {
     const update = ++this.sizeUpdate
     void this.updateComplete.then(async () => {
       if (!this.isConnected || update !== this.sizeUpdate) return
@@ -203,13 +217,49 @@ export class AutoGrid extends LitElement {
       // The card may disconnect while its children's sizes are pending.
       // oxlint-disable-next-line typescript/no-unnecessary-condition
       if (!this.isConnected || update !== this.sizeUpdate) return
-      this.dispatchEvent(new CustomEvent("card-size-changed", { bubbles: true, composed: true }))
       if (size !== this.reportedSize) {
         this.reportedSize = size
+        this.dispatchEvent(new CustomEvent("card-size-changed", { bubbles: true, composed: true }))
         // Masonry listens for card-updated, not card-size-changed.
         this.dispatchEvent(new CustomEvent("card-updated", { bubbles: true, composed: true }))
       }
     })
+  }
+
+  private renderedColumns(grid: Element): number {
+    const tracks = getComputedStyle(grid).gridTemplateColumns
+    return tracks === "none" || !tracks ? 1 : tracks.trim().split(/\s+/).length
+  }
+
+  protected updated(): void {
+    if (!this.isConnected || !this.config || minimumWidth(this.config.columns) === undefined) {
+      this.resizeObserver?.disconnect()
+      this.observedGrids.clear()
+      return
+    }
+    this.resizeObserver ??= new ResizeObserver((entries) => {
+      let changed = false
+      for (const { target } of entries) {
+        if (!this.observedGrids.has(target)) continue
+        const columns = this.renderedColumns(target)
+        if (columns !== this.observedGrids.get(target)) {
+          this.observedGrids.set(target, columns)
+          changed = true
+        }
+      }
+      if (changed) this.reportSize()
+    })
+    const grids = new Set(this.renderRoot.querySelectorAll(".grid"))
+    for (const grid of this.observedGrids.keys())
+      if (!grids.has(grid)) {
+        this.resizeObserver.unobserve(grid)
+        this.observedGrids.delete(grid)
+      }
+    for (const grid of grids) {
+      if (this.observedGrids.has(grid)) continue
+      this.observedGrids.set(grid, this.renderedColumns(grid))
+      this.resizeObserver.observe(grid)
+    }
   }
 
   async getCardSize(): Promise<number> {
@@ -226,10 +276,15 @@ export class AutoGrid extends LitElement {
       })
     )
     const byEntity = new Map(cards.map(({ entity }, i) => [entity, sizes[i]]))
+    const grids = [...(this.shadowRoot?.querySelectorAll(".grid") ?? [])]
     let size = 0
-    for (const section of sections) {
-      const columns =
-        configuredColumns === "auto" ? Math.max(1, section.cards.length) : configuredColumns
+    for (const [index, section] of sections.entries()) {
+      let columns = typeof configuredColumns === "number" ? configuredColumns : 1
+      if (configuredColumns === "all") columns = Math.max(1, section.cards.length)
+      else if (minimumWidth(configuredColumns) !== undefined) {
+        const grid = grids.at(index)
+        if (grid) columns = this.renderedColumns(grid)
+      }
       if (sections.length > 1 && visibleHeading(section.heading)) size++
       const heights = section.cards.map(({ entity }) => byEntity.get(entity) ?? 1)
       for (let i = 0; i < heights.length; i += columns)
@@ -307,8 +362,8 @@ export class AutoGrid extends LitElement {
         html` <section class="section">
           ${sections.length > 1 && visibleHeading(section.heading) ? html`<div class="group-header">${this.headings.get(`group:${section.key}`)?.card ?? nothing}</div>` : nothing}
           <div
-            class="grid"
-            style=${this.config?.columns === "auto" ? `--auto-grid-columns: ${section.cards.length}` : nothing}
+            class=${this.config && minimumWidth(this.config.columns) !== undefined ? "grid responsive" : "grid"}
+            style=${this.config?.columns === "all" ? `--auto-grid-columns: ${section.cards.length}` : nothing}
           >
             ${repeat(
               section.cards,
@@ -349,6 +404,12 @@ export class AutoGrid extends LitElement {
       display: grid;
       grid-template-columns: repeat(var(--auto-grid-columns, 2), minmax(0, 1fr));
       gap: var(--auto-grid-gap, var(--grid-card-gap, 8px));
+    }
+    .grid.responsive {
+      grid-template-columns: repeat(
+        auto-fill,
+        minmax(min(var(--auto-grid-min-width, 140px), 100%), 1fr)
+      );
     }
     .cell {
       min-width: 0;

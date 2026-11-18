@@ -89,18 +89,18 @@ Use `include` to select entities and `card` for shared child-card options. Rules
 one filter are **AND**; a list of include filters is **OR**. The first matching
 include wins, each entity appears once, and `exclude` removes matches globally.
 
-| Option       | Default          | Description                                                               |
-| ------------ | ---------------- | ------------------------------------------------------------------------- |
-| `include`    | Required         | A selection filter or list; groups may override `card`                    |
-| `exclude`    | —                | A global exclusion filter or list                                         |
-| `card`       | `{ type: tile }` | Shared child-card configuration; `entity` is reserved                     |
-| `heading`    | —                | Native heading config or text shorthand; defaults to Title style          |
-| `columns`    | `2`              | Positive integer for fixed columns, or `auto` for a single horizontal row |
-| `square`     | `false`          | Square cells, like the native grid card                                   |
-| `show_empty` | `false`          | Show loading/empty placeholders instead of hiding the grid                |
-| `group`      | `false`          | Boolean, field name, or `{ by, heading }` for visual grouping             |
-| `sort`       | `name`           | Sort string/object or mixed priority-ordered list; `[]` disables sorting  |
-| `limit`      | —                | Maximum results after sorting, before grouping                            |
+| Option       | Default          | Description                                                              |
+| ------------ | ---------------- | ------------------------------------------------------------------------ |
+| `include`    | Required         | A selection filter or list; groups may override `card`                   |
+| `exclude`    | —                | A global exclusion filter or list                                        |
+| `card`       | `{ type: tile }` | Shared child-card configuration; `entity` is reserved                    |
+| `heading`    | —                | Native heading config or text shorthand; defaults to Title style         |
+| `columns`    | `2`              | Fixed count (1–24), `all` for one row, or responsive `auto` / `180px`    |
+| `square`     | `false`          | Square cells, like the native grid card                                  |
+| `show_empty` | `false`          | Show loading/empty placeholders instead of hiding the grid               |
+| `group`      | `false`          | Boolean, field name, or `{ by, heading }` for visual grouping            |
+| `sort`       | `name`           | Sort string/object or mixed priority-ordered list; `[]` disables sorting |
+| `limit`      | —                | Maximum results after sorting, before grouping                           |
 
 For the complete reference, see [Configuration](docs/configuration.md):
 
@@ -198,15 +198,15 @@ Nested options replace inherited values rather than merging recursively.
 
 ## 💡 Notes
 
-- `columns: auto` means one horizontal row, **not** responsive wrapping. Use a
-  scoped selection or `limit` to avoid crowded rows.
+- `columns: auto` wraps at a 140px minimum width; use e.g. `columns: 180px` for
+  a custom minimum, `columns: all` for one row, or a count from 1–24 for fixed columns.
 - Use an area, label, integration, explicit entity list, or domain/type to scope
   queries. Broad queries can be rate-limited by Home Assistant.
 - `show_empty: false` hides loading/empty grids, including their Sections layout
   gaps. An empty grid stays subscribed so it can populate again; query errors show
   a Retry button.
 - This is an equal-column grid, not the full Sections layout engine. Per-card spans
-  and minimum-width-based wrapping are not supported.
+  and per-card row/column sizing are not supported.
 
 For architecture, subscription behavior, and performance trade-offs, see
 [Internals](docs/internals.md). Maintainer release instructions are in

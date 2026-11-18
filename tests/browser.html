@@ -162,29 +162,29 @@
         await tick()
         assert(tiles()[0] === b && tiles()[1] === a, "keyed rendering preserves card identity")
         assert(created === 3, "only the added card was created")
-        grid.setConfig({ ...config, columns: "auto" })
+        grid.setConfig({ ...config, columns: "all" })
         await tick()
         const columnCounts = () =>
           [...grid.shadowRoot.querySelectorAll(".grid")].map(
             (el) => getComputedStyle(el).gridTemplateColumns.split(" ").length
           )
-        assert(columnCounts()[0] === 3, "auto gives every card its own column")
-        assert((await grid.getCardSize()) === 1, "auto sizing is one row")
+        assert(columnCounts()[0] === 3, "all gives every card its own column")
+        assert((await grid.getCardSize()) === 1, "all sizing is one row")
         b.getCardSize = () => 3
-        assert((await grid.getCardSize()) === 3, "auto sizing uses the tallest child")
+        assert((await grid.getCardSize()) === 3, "all sizing uses the tallest child")
         delete b.getCardSize
         grid.style.width = "120px"
         await tick()
         const autoCells = [...grid.shadowRoot.querySelectorAll(".cell")]
         assert(
           new Set(autoCells.map((cell) => cell.offsetTop)).size === 1,
-          "auto never wraps on narrow screens"
+          "all never wraps on narrow screens"
         )
         assert(
           Math.max(...autoCells.map((cell) => cell.getBoundingClientRect().width)) -
             Math.min(...autoCells.map((cell) => cell.getBoundingClientRect().width)) <
             1,
-          "auto columns have equal widths"
+          "all columns have equal widths"
         )
         grid.style.removeProperty("width")
         grid.setConfig({ ...config, columns: 1 })
@@ -199,7 +199,7 @@
         )
         assert(
           tiles()[0] === b && tiles()[1] === a && created === 3 && subscriptions.length === 1,
-          "auto/fixed layout switches preserve cards and the query"
+          "all/fixed layout switches preserve cards and the query"
         )
         grid.setConfig({ ...config, columns: 3, title: "Pool lights" })
         await tick()
@@ -387,7 +387,7 @@
           (await grid.getCardSize()) === 4,
           "group headers and incomplete rows contribute to size"
         )
-        grid.setConfig({ ...config, group: "area", columns: "auto" })
+        grid.setConfig({ ...config, group: "area", columns: "all" })
         emitSections([
           section("Pool", "Pool", ["light.a", "light.c"]),
           section("Other", "Other", ["light.b"]),
@@ -395,17 +395,17 @@
         await tick()
         assert(
           columnCounts().join() === "2,1",
-          "auto columns are calculated independently per group"
+          "all columns are calculated independently per group"
         )
         assert(
           (await grid.getCardSize()) === 4,
-          "grouped auto sizing includes headings and one row per group"
+          "grouped all sizing includes headings and one row per group"
         )
         emitSections([section("Other", "Other", ["light.a", "light.c", "light.b"])])
         await tick()
         assert(
           columnCounts()[0] === 3 && (await grid.getCardSize()) === 1,
-          "auto column counts follow group membership"
+          "all column counts follow group membership"
         )
         emitSections([section("Pool", "Pool", ["light.a"]), section("Other", "Other", ["light.b"])])
         await tick()
@@ -1187,6 +1187,169 @@
           "rich group headings still disappear for a single group"
         )
         templatedHeading.remove()
+        await tick()
+
+        const NativeResizeObserver = window.ResizeObserver
+        const observedTargets = new Set()
+        let resizeObservers = 0
+        const observerInstances = []
+        // Virtual-time headless runs do not reliably deliver animation-frame observers.
+        window.ResizeObserver = class {
+          targets = new Set()
+          constructor(callback) {
+            this.callback = callback
+            resizeObservers++
+            observerInstances.push(this)
+          }
+          observe(target) {
+            this.targets.add(target)
+            observedTargets.add(target)
+          }
+          unobserve(target) {
+            this.targets.delete(target)
+            observedTargets.delete(target)
+          }
+          disconnect() {
+            for (const target of this.targets) observedTargets.delete(target)
+            this.targets.clear()
+          }
+        }
+        const settleResize = async () => {
+          await tick()
+          for (const observer of observerInstances)
+            observer.callback([...observer.targets].map((target) => ({ target })))
+          await tick()
+        }
+        const responsive = document.createElement("auto-grid")
+        const responsiveIndex = subscriptions.length
+        const responsiveConfig = {
+          include: { entity: Array.from({ length: 6 }, (_, i) => `light.responsive_${i}`) },
+          columns: "auto",
+          sort: [],
+        }
+        responsive.style.width = "440px"
+        responsive.setConfig(responsiveConfig)
+        responsive.hass = hass
+        let responsiveUpdates = 0,
+          responsiveSizeEvents = 0
+        responsive.addEventListener("card-updated", () => responsiveUpdates++)
+        responsive.addEventListener("card-size-changed", () => responsiveSizeEvents++)
+        document.body.append(responsive)
+        emit(responsiveIndex, responsiveConfig.include.entity)
+        await settleResize()
+        const responsiveGrid = () => responsive.shadowRoot.querySelector(".grid")
+        const responsiveColumns = () =>
+          getComputedStyle(responsiveGrid()).gridTemplateColumns.split(" ").length
+        const responsiveTiles = [...responsive.shadowRoot.querySelectorAll("test-tile")]
+        const responsiveCreated = created
+        assert(
+          responsiveColumns() === 3 && (await responsive.getCardSize()) === 2,
+          "auto wraps using a 140px minimum and reports actual rows"
+        )
+        assert(
+          resizeObservers === 1 && observedTargets.size === 1,
+          "one observer watches the responsive grid"
+        )
+        const beforeResize = responsiveUpdates
+        responsive.style.width = "430px"
+        await settleResize()
+        assert(
+          responsiveColumns() === 2 &&
+            (await responsive.getCardSize()) === 3 &&
+            responsiveUpdates === beforeResize + 1,
+          `resizing across a breakpoint reports the new masonry size (columns=${responsiveColumns()}, size=${await responsive.getCardSize()}, updates=${responsiveUpdates}, before=${beforeResize})`
+        )
+        const stableUpdates = responsiveUpdates,
+          stableSizeEvents = responsiveSizeEvents
+        responsive.style.width = "420px"
+        for (let i = 0; i < 20; i++) responsive.hass = { ...hass, states: { generation: i } }
+        await settleResize()
+        assert(
+          responsiveUpdates === stableUpdates && responsiveSizeEvents === stableSizeEvents,
+          "resizing within a column band and hass updates emit no sizing events"
+        )
+        responsive.style.width = "600px"
+        responsive.setConfig({ ...responsiveConfig, columns: "180px" })
+        await settleResize()
+        assert(
+          responsiveColumns() === 3 && (await responsive.getCardSize()) === 2,
+          "explicit pixel minimums control responsive wrapping"
+        )
+        assert(
+          responsive.shadowRoot.querySelector("test-tile") === responsiveTiles[0] &&
+            created === responsiveCreated &&
+            subscriptions.length === responsiveIndex + 1,
+          "resizing and layout changes preserve cards and the backend query"
+        )
+        responsive.style.width = "100px"
+        await settleResize()
+        assert(
+          responsiveColumns() === 1 &&
+            responsiveGrid().getBoundingClientRect().width <= 100 &&
+            responsive.shadowRoot.querySelector(".cell").getBoundingClientRect().width <= 100,
+          "a minimum wider than the container does not overflow"
+        )
+        responsive.style.width = "1100px"
+        emit(responsiveIndex, responsiveConfig.include.entity.slice(0, 2))
+        await settleResize()
+        assert(
+          responsiveColumns() === 5 &&
+            responsive.shadowRoot.querySelector(".cell").getBoundingClientRect().width < 300 &&
+            (await responsive.getCardSize()) === 1,
+          "auto-fill reserves empty tracks rather than stretching sparse results"
+        )
+        responsive.setConfig({ ...responsiveConfig, columns: "all" })
+        await settleResize()
+        assert(
+          observedTargets.size === 0 && responsiveColumns() === 2,
+          "single-row mode releases resize observations"
+        )
+        responsive.setConfig({ ...responsiveConfig, columns: "auto" })
+        await settleResize()
+        assert(
+          resizeObservers === 1 && observedTargets.size === 1,
+          "returning to responsive mode reuses the observer"
+        )
+        responsive.remove()
+        await settleResize()
+        assert(observedTargets.size === 0, "disconnect releases all resize observations")
+        document.body.append(responsive)
+        await settleResize()
+        emit(subscriptions.length - 1, responsiveConfig.include.entity.slice(0, 2))
+        await settleResize()
+        assert(
+          observedTargets.size === 1 && resizeObservers === 1,
+          "reconnection restores responsive observation"
+        )
+        responsive.setConfig({ ...responsiveConfig, columns: "180px", group: "area" })
+        await settleResize()
+        const responsiveGroupIndex = subscriptions.length - 1
+        const responsiveSections = [
+          section("First", "First", responsiveConfig.include.entity.slice(0, 2)),
+          section("Second", "Second", responsiveConfig.include.entity.slice(2, 3)),
+        ]
+        subscriptions[responsiveGroupIndex].callback({ result: responsiveSections })
+        await settleResize()
+        assert(
+          observedTargets.size === 2 &&
+            resizeObservers === 1 &&
+            (await responsive.getCardSize()) === 4,
+          "one observer measures all group grids and accounts for their headings"
+        )
+        responsive.style.width = "100px"
+        await settleResize()
+        assert(
+          (await responsive.getCardSize()) === 5,
+          "grouped responsive sizing counts wrapped rows in each group"
+        )
+        subscriptions[responsiveGroupIndex].callback({ result: [responsiveSections[0]] })
+        await settleResize()
+        assert(
+          observedTargets.size === 1 && (await responsive.getCardSize()) === 2,
+          "removed groups release observations and single-group headings remain hidden"
+        )
+        responsive.remove()
+        window.ResizeObserver = NativeResizeObserver
         await tick()
         document.body.dataset.status = "passed"
         document.querySelector("#result").textContent = `Passed ${assertions} browser assertions`

@@ -58,6 +58,11 @@ YAML contract and examples, see [Configuration](configuration.md).
 - Masonry layouts receive HA's `card-updated` event only when the reported card size
   changes. Initially hidden grids can be redistributed after loading, without a
   loading placeholder or relayout on ordinary `hass` updates.
+- Responsive `auto` and pixel-width layouts use CSS `auto-fill`. One ResizeObserver
+  per Auto Grid observes its rendered grids, tracking the actual column counts for
+  row-size reporting. It performs no selection or child configuration work; resize
+  events notify HA only when reported size changes. Fixed and `all` layouts need no
+  resize observation. Disconnecting releases all observations.
 - Query errors and helper failures are shown in the card, with a Retry button.
 
 ## 🗂️ Registry Changes

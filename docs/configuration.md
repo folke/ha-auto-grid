@@ -12,24 +12,26 @@ The complete YAML reference for `custom:auto-grid`.
 
 ## Options
 
-| Option       | Default          | Description                                                               |
-| ------------ | ---------------- | ------------------------------------------------------------------------- |
-| `include`    | Required         | A selection filter or list; groups may override `card`                    |
-| `exclude`    | —                | A global exclusion filter or list                                         |
-| `card`       | `{ type: tile }` | Shared child-card configuration; `entity` is reserved                     |
-| `heading`    | —                | Native heading config or text shorthand; defaults to Title style          |
-| `columns`    | `2`              | Positive integer for fixed columns, or `auto` for a single horizontal row |
-| `square`     | `false`          | Square cells, like the native grid card                                   |
-| `show_empty` | `false`          | Show loading/empty placeholders instead of hiding the grid                |
-| `group`      | `false`          | Boolean, field name, or `{ by, heading }` for visual grouping             |
-| `sort`       | `name`           | Sort string/object or mixed priority-ordered list; `[]` disables sorting  |
-| `limit`      | —                | Maximum results after sorting, before grouping                            |
+| Option       | Default          | Description                                                              |
+| ------------ | ---------------- | ------------------------------------------------------------------------ |
+| `include`    | Required         | A selection filter or list; groups may override `card`                   |
+| `exclude`    | —                | A global exclusion filter or list                                        |
+| `card`       | `{ type: tile }` | Shared child-card configuration; `entity` is reserved                    |
+| `heading`    | —                | Native heading config or text shorthand; defaults to Title style         |
+| `columns`    | `2`              | Fixed count (1–24), `all` for one row, or responsive `auto` / `180px`    |
+| `square`     | `false`          | Square cells, like the native grid card                                  |
+| `show_empty` | `false`          | Show loading/empty placeholders instead of hiding the grid               |
+| `group`      | `false`          | Boolean, field name, or `{ by, heading }` for visual grouping            |
+| `sort`       | `name`           | Sort string/object or mixed priority-ordered list; `[]` disables sorting |
+| `limit`      | —                | Maximum results after sorting, before grouping                           |
 
 ### Grid and stack layouts
 
 - `columns: 1`: a vertical stack.
 - `columns: 2` (the default): a two-column grid, wrapping into additional rows.
-- `columns: auto`: one equal-width column per rendered card, like a horizontal stack.
+- `columns: all`: one equal-width column per rendered card, like a horizontal stack.
+- `columns: auto`: responsive wrapping with a 140px minimum card width.
+- `columns: 180px`: responsive wrapping with an explicit positive pixel minimum.
 
 ```yaml
 type: custom:auto-grid
@@ -39,16 +41,22 @@ include:
   type: light
 ```
 
-`auto` does **not** mean responsive wrapping or auto-fill: cards share a single row,
-even on narrow screens. Each visual group calculates its own column count after
-filtering and limiting. Membership changes update that count; changing between auto
-and fixed columns preserves child cards and the backend subscription. Use a scoped
-selection or `limit` to avoid an overly crowded horizontal row. `square` still applies.
+Responsive modes use CSS `auto-fill`, reserving empty tracks so sparse groups
+keep consistent card widths. The minimum is capped at the container width: a 300px
+minimum on a narrow phone becomes one full-width column rather than overflowing.
+Only positive pixel lengths are supported, including decimals; other CSS units and
+expressions are rejected. Fixed counts must be between 1 and 24. Numeric strings
+such as `"3"` are accepted as counts; use `180px`, not `180`, for a minimum width.
+
+Each visual group lays out independently. Changing width, layout mode, or membership
+preserves retained child cards and the backend subscription. Responsive sizing is
+reported to HA as the available width changes. Use a scoped selection or `limit` to
+avoid an overly crowded `all` row. `square` applies in every mode.
 
 This is an equal-column grid, not the full Sections layout engine. It does not
-implement per-card column/row spans or minimum-width-based wrapping. Grid spacing can
-be customized with the `--auto-grid-gap` CSS property; otherwise it uses HA's
-`--grid-card-gap` or `8px`.
+implement per-card column/row spans or infer pixel widths from child Sections sizing
+hints. Grid spacing can be customized with the `--auto-grid-gap` CSS property;
+otherwise it uses HA's `--grid-card-gap` or `8px`.
 
 ## Visual Editor
 

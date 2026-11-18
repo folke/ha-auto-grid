@@ -23,16 +23,46 @@ test("defaults to two columns of tiles and name sorting without mutating input",
   assert.deepEqual(input, original)
 })
 
-test("columns accepts positive integers or auto without changing backend queries", () => {
+test("column modes and numeric strings normalize without changing backend queries", () => {
   const base = normalizeConfig({ include: { type: "light" } })
-  for (const columns of [1, 2, 6, "auto"]) {
+  for (const columns of [1, 2, 6, 24, "auto", "all", "180px", "0.5px"]) {
     const config = normalizeConfig({ include: { type: "light" }, columns })
     assert.equal(config.columns, columns)
     assert.deepEqual(config.query, base.query)
   }
-  for (const columns of [0, -1, 1.5, "0", "2", "fill", "AUTO", "", null, false, [], {}, Infinity]) {
+  for (const [input, expected] of [
+    ["3", 3],
+    [" 03 ", 3],
+    [" 180px ", "180px"],
+    [".5px", "0.5px"],
+  ])
+    assert.equal(normalizeConfig({ include: {}, columns: input }).columns, expected)
+  for (const columns of [
+    0,
+    -1,
+    1.5,
+    "0",
+    "fill",
+    "AUTO",
+    "",
+    null,
+    false,
+    [],
+    {},
+    Infinity,
+    "0px",
+    "-1px",
+    "1rem",
+    "10em",
+    "50%",
+    "calc(100px)",
+    "1e2px",
+    "NaNpx",
+  ]) {
     assert.throws(() => normalizeConfig({ include: {}, columns }), /columns must be/)
   }
+  for (const columns of [25, 180, "180", "999999999999999999999"])
+    assert.throws(() => normalizeConfig({ include: {}, columns }), /maximum of 24.*px/)
 })
 
 test("title is optional presentation configuration and does not change the query", () => {

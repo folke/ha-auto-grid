@@ -1,3 +1,4 @@
+import { normalizeColumns } from "./layout.ts"
 import { validateCardOptions } from "./card-templates.ts"
 import { normalizeConfig } from "./query.ts"
 import { headingConfig } from "./heading.ts"
@@ -111,19 +112,9 @@ export function updateLayout(
   const data = { ...current, ...value }
   const result = structuredClone(config)
   if (!sameConfig(data.columns, current.columns)) {
-    if (
-      data.columns != null &&
-      typeof data.columns !== "string" &&
-      typeof data.columns !== "number"
-    ) {
-      throw new Error('Columns must be a positive integer or "auto"')
-    }
-    const text = String(data.columns ?? "").trim()
-    if (!text) delete result.columns
-    else if (text === "auto") result.columns = "auto"
-    else if (/^\d+$/.test(text) && Number.isSafeInteger(Number(text)) && Number(text) > 0)
-      result.columns = Number(text)
-    else throw new Error('Columns must be a positive integer or "auto"')
+    if (data.columns == null || (typeof data.columns === "string" && !data.columns.trim()))
+      delete result.columns
+    else result.columns = normalizeColumns(data.columns)
   }
   for (const key of ["square", "show_empty"] as const) {
     if (sameConfig(data[key], current[key])) continue
