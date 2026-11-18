@@ -22,6 +22,7 @@
         let created = 0
         let failHeadings = false
         let holdHeadings = false
+        const pendingCards = []
         const pendingHeadings = []
         class TestTile extends HTMLElement {
           setConfig(config) {
@@ -52,6 +53,8 @@
                   : "test-tile"
             )
             card.setConfig(config)
+            if (config.type === "custom:slow-card")
+              return new Promise((resolve) => pendingCards.push({ card, resolve }))
             if (config.type === "heading" && failHeadings) throw new Error("Heading helper failed")
             if (config.type === "heading" && holdHeadings)
               return new Promise((resolve) => pendingHeadings.push({ config, card, resolve }))
@@ -1117,8 +1120,8 @@
         const headingIndex = subscriptions.length
         templatedHeading.setConfig({
           include: { entity: ["light.a", "light.b"] },
-          heading: { heading: "{{ states('sensor.count') }}", $icon: "mdi:home" },
-          group: { by: "area", heading: { heading: "{{ group_name }}", $icon: "mdi:lightbulb" } },
+          heading: { $heading: "{{ states('sensor.count') }}", $icon: "mdi:home" },
+          group: { by: "area", heading: { $heading: "{{ group_name }}", $icon: "mdi:lightbulb" } },
         })
         templatedHeading.hass = hass
         document.body.append(templatedHeading)
@@ -1188,6 +1191,216 @@
         )
         templatedHeading.remove()
         await tick()
+
+        assert(
+          customElements.get("auto-card") &&
+            window.customCards.some((card) => card.type === "auto-card"),
+          "Auto Card registers alongside Auto Grid"
+        )
+        const single = document.createElement("auto-card")
+        const singleIndex = subscriptions.length
+        const singleConfig = {
+          card: { type: "markdown", content: "Hello", grid_options: { columns: 9 } },
+        }
+        single.setConfig(singleConfig)
+        single.hass = hass
+        single.preview = true
+        single.layout = "grid"
+        document.body.append(single)
+        await tick()
+        const singleChild = single.shadowRoot.querySelector("test-tile")
+        assert(
+          singleChild &&
+            !single.shadowRoot.querySelector(".grid") &&
+            !("entity" in singleChild.config),
+          "Auto Card wraps non-entity cards without a grid or injected entity"
+        )
+        assert(
+          subscriptions.length === singleIndex &&
+            singleChild.preview &&
+            singleChild.layout === "grid" &&
+            singleChild.hass === hass,
+          "static Auto Card has no subscription and forwards its runtime properties"
+        )
+        singleChild.getGridOptions = () => ({
+          columns: 6,
+          min_columns: 3,
+          rows: 2,
+          min_rows: 1,
+          max_rows: 4,
+        })
+        assert(
+          single.getGridOptions().columns === 9 && single.getGridOptions().rows === 2,
+          "Auto Card merges explicit inner grid_options over child sizing hints"
+        )
+        single.setConfig({ ...singleConfig, heading: "Overview" })
+        await tick()
+        assert(
+          (await single.getCardSize()) === 2 &&
+            single.getGridOptions().rows === 3 &&
+            single.getGridOptions().min_rows === 2 &&
+            single.getGridOptions().max_rows === 5,
+          "Auto Card accounts for an optional heading in size hints"
+        )
+        single.setConfig({ card: { ...singleConfig.card, content: "Changed" } })
+        await tick()
+        assert(
+          single.shadowRoot.querySelector("test-tile") === singleChild &&
+            singleChild.config.content === "Changed" &&
+            (await single.getCardSize()) === 1,
+          "static edits reconfigure the retained inner card and headings can be removed"
+        )
+        single.remove()
+        const pair = [document.createElement("auto-card"), document.createElement("auto-card")]
+        const pairIndex = subscriptions.length
+        const pairConfig = {
+          card: { type: "tile", entity: "light.pool", $name: "{{ states(entity) }}" },
+        }
+        for (const card of pair) {
+          card.setConfig(pairConfig)
+          card.hass = hass
+          document.body.append(card)
+        }
+        await tick()
+        assert(
+          subscriptions.length === pairIndex + 1 &&
+            subscriptions[pairIndex].request.variables.entity === "light.pool",
+          "identical Auto Cards share one template subscription with config and entity"
+        )
+        subscriptions[pairIndex].callback({ result: ["On"] })
+        await tick()
+        const pairChild = pair[0].shadowRoot.querySelector("test-tile")
+        assert(
+          pairChild.config.entity === "light.pool" &&
+            pairChild.config.name === "On" &&
+            !("$name" in pairChild.config),
+          "Auto Card renders template properties into normal child options"
+        )
+        const pairCreated = created,
+          pairSetCount = pairChild.setCount
+        for (let i = 0; i < 30; i++) pair[0].hass = { ...hass, states: { generation: i } }
+        subscriptions[pairIndex].callback({ result: ["On"] })
+        await tick()
+        assert(
+          created === pairCreated &&
+            pairChild.setCount === pairSetCount &&
+            subscriptions.length === pairIndex + 1,
+          "ordinary hass and identical template results do no child configuration or subscription work"
+        )
+        subscriptions[pairIndex].callback({ result: ["Off"] })
+        await tick()
+        assert(
+          pair[0].shadowRoot.querySelector("test-tile") === pairChild &&
+            pairChild.config.name === "Off",
+          "changed template values reconfigure the retained child"
+        )
+        subscriptions[pairIndex].callback({ error: "Shared Auto Card failure" })
+        await tick()
+        assert(
+          pair.every((card) => card.shadowRoot.querySelector('[role="alert"]')),
+          "shared Auto Card template errors remain visible"
+        )
+        pair[0].shadowRoot.querySelector("button").click()
+        await tick()
+        assert(
+          subscriptions.length === pairIndex + 2,
+          "Retry reopens the shared Auto Card template entry"
+        )
+        subscriptions[pairIndex + 1].callback({ result: ["Recovered"] })
+        await tick()
+        assert(
+          pair.every(
+            (card) => card.shadowRoot.querySelector("test-tile").config.name === "Recovered"
+          ),
+          "Retry recovers every Auto Card sharing the query"
+        )
+        const replacementRequests = []
+        pair[0].hass = {
+          connection: {
+            subscribeMessage(callback, request) {
+              if (request.type === "render_template")
+                replacementRequests.push({ callback, request })
+              return Promise.resolve(() => {})
+            },
+          },
+          states: {},
+        }
+        await tick()
+        subscriptions[pairIndex + 1].callback({ result: ["Old connection"] })
+        replacementRequests[0].callback({ result: ["New connection"] })
+        await tick()
+        assert(
+          pair[0].shadowRoot.querySelector("test-tile").config.name === "New connection" &&
+            pair[1].shadowRoot.querySelector("test-tile").config.name === "Old connection",
+          "connection replacement separates Auto Card subscriptions and ignores old callbacks"
+        )
+        pair[0].remove()
+        pair[1].remove()
+        await tick()
+        const typeCard = document.createElement("auto-card")
+        const typeIndex = subscriptions.length
+        typeCard.setConfig({
+          card: { $type: "{{ states('input_text.card_type') }}", $entity: "light.pool" },
+          $heading: "{{ states('input_text.heading') }}",
+        })
+        typeCard.hass = hass
+        document.body.append(typeCard)
+        subscriptions[typeIndex].callback({ result: ["tile", "light.pool"] })
+        subscriptions[typeIndex + 1].callback({ result: ["Controls"] })
+        await tick()
+        const autoHeading = typeCard.shadowRoot.querySelector("test-heading")
+        assert(
+          autoHeading?.config.heading === "Controls" && (await typeCard.getCardSize()) === 2,
+          "Auto Card supports live heading templates independently of the inner card"
+        )
+        const oldTypeChild = typeCard.shadowRoot.querySelector("test-tile")
+        subscriptions[typeIndex].callback({ result: ["button", "light.pool"] })
+        await tick()
+        assert(
+          typeCard.shadowRoot.querySelector("test-tile") !== oldTypeChild &&
+            typeCard.shadowRoot.querySelector("test-tile").config.type === "button",
+          "templated card type changes replace rather than reconfigure children"
+        )
+        subscriptions[typeIndex + 1].callback({ result: ["Updated heading"] })
+        await tick()
+        assert(
+          typeCard.shadowRoot.querySelector("test-heading") === autoHeading &&
+            autoHeading.config.heading === "Updated heading",
+          "Auto Card retains native headings across template updates"
+        )
+        subscriptions[typeIndex + 1].callback({ result: [""] })
+        await tick()
+        assert(
+          !typeCard.shadowRoot.querySelector("test-heading") &&
+            (await typeCard.getCardSize()) === 1,
+          "empty Auto Card heading results release their reserved height"
+        )
+        typeCard.remove()
+        const slow = document.createElement("auto-card")
+        slow.setConfig({ card: { type: "custom:slow-card", content: "Old" } })
+        slow.hass = hass
+        document.body.append(slow)
+        await tick()
+        const late = pendingCards.at(-1)
+        slow.setConfig({ card: { type: "markdown", content: "New" } })
+        await tick()
+        late.resolve(late.card)
+        await tick()
+        assert(
+          slow.shadowRoot.querySelector("test-tile").config.content === "New" &&
+            !late.card.isConnected,
+          "late child creation cannot overwrite newer Auto Card config"
+        )
+        slow.setConfig({ card: { type: "custom:slow-card", content: "Disconnected" } })
+        await tick()
+        const disconnectedChild = pendingCards.at(-1)
+        slow.remove()
+        disconnectedChild.resolve(disconnectedChild.card)
+        await tick()
+        assert(
+          !disconnectedChild.card.isConnected,
+          "pending Auto Card children never mount after disconnect"
+        )
 
         const NativeResizeObserver = window.ResizeObserver
         const observedTargets = new Set()

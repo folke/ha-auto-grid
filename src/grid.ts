@@ -1,5 +1,6 @@
 import { normalizeResult } from "./query.ts"
-import { compileHeadingOptions, validateHeading } from "./heading.ts"
+import { compileHeadingOptions } from "./heading.ts"
+import { subscribeCardOptions } from "./standalone-templates.ts"
 import { renderCardOptions } from "./card-templates.ts"
 import { subscribeTemplate } from "./subscriptions.ts"
 import type { TemplateSubscription } from "./subscriptions.ts"
@@ -118,21 +119,15 @@ export class GridController {
       this.changed()
       return
     }
-    const template = [
-      ...plan.templates.map(
-        ({ source }, index) => `{% macro ag_heading_${index}() -%}${source}{%- endmacro %}`
-      ),
-      `[${plan.templates.map((_, index) => `{{ ag_heading_${index}() | trim | to_json }}`).join(", ")}]`,
-    ].join("\n")
     const valid = () => this.active && this.headingToken === token
     const fail = (error: unknown) => {
       if (!valid()) return
       this.headingError = error instanceof Error ? error.message : String(error)
       this.changed()
     }
-    this.disposeHeading = subscribeTemplate(
+    this.disposeHeading = subscribeCardOptions(
       this.hass.connection,
-      template,
+      this.config!.heading!,
       {
         error: fail,
         refresh: () => {
@@ -140,29 +135,17 @@ export class GridController {
           this.headingError = undefined
           this.changed()
         },
-        result: (values) => {
+        result: (heading) => {
           if (!valid()) return
-          try {
-            if (!Array.isArray(values) || values.some((value) => typeof value !== "string"))
-              throw new Error("Heading template values must be strings")
-            const heading = validateHeading(
-              renderCardOptions(plan.card, plan.templates, values as string[])
-            )
-            const changed =
-              this.headingError !== undefined ||
-              JSON.stringify(heading) !== JSON.stringify(this.heading)
-            this.heading = heading
-            this.headingError = undefined
-            if (changed) this.changed()
-          } catch (error) {
-            fail(error)
-          }
+          const changed =
+            this.headingError !== undefined ||
+            JSON.stringify(heading) !== JSON.stringify(this.heading)
+          this.heading = heading
+          this.headingError = undefined
+          if (changed) this.changed()
         },
       },
-      { config: plan.context },
-      {
-        registries: ["entity", "device", "area", "floor", "label", "integration"],
-      }
+      true
     )
   }
 

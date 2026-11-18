@@ -2,7 +2,8 @@
 
 [← README](../README.md)
 
-The complete YAML reference for `custom:auto-grid`.
+The complete YAML reference for `custom:auto-grid`. To template one existing card
+without entity selection, see [Auto Card](auto-card.md).
 
 - [Options](#options), [layouts](#grid-and-stack-layouts), and the [visual editor](#visual-editor)
 - [Selection](#include-groups-and-global-exclusions) and [filter rules](#filter-rules)
@@ -75,11 +76,17 @@ Choosing another entity makes an editor-local override; otherwise the sample
 follows the current results. With no matches, it is unset. Samples are never saved
 as `card.entity` and do not affect selection.
 
-Card YAML can change the card type. `$` properties force YAML mode until removed;
-ordinary Mushroom Jinja strings pass through untouched. Cards without a usable
-visual editor fall back to YAML without changing saved configuration. Invalid
-card, selection, and layout drafts show inline errors and do not replace the last
-valid configuration.
+Card YAML can change the card type. Safe object-property templates can use the
+native editor with a stable rendered snapshot from the selection query. Static
+edits are merged into the original configuration; template-controlled values are
+protected, never persisted as rendered literals, and listed in an editor note.
+Backend updates do not overwrite the snapshot while editing. Initialization events
+do not save native defaults for templated cards. Templates inside arrays, templated
+card types, and structural changes involving templates require YAML; missing or
+unusable rendered samples also fall back to YAML. Ordinary Mushroom Jinja strings
+pass through untouched. Cards without a usable visual editor fall back to YAML
+without changing saved configuration. Invalid card, selection, and layout drafts
+show inline errors and do not replace the last valid configuration.
 
 Safe compatibility conversions produce configuration warnings above the rendered
 card in preview, including the outer YAML editor. Each warning identifies the
@@ -456,14 +463,21 @@ heading:
 ```
 
 The main heading defaults to `heading_style: title`; you can select `subtitle` if
-preferred. Text containing `{{` or `{%` is automatically rendered as backend Jinja,
-in both the string shorthand and the `heading.heading` property. Explicit `$heading`
-is also supported. Other properties opt in with `$`, including nested action and
-badge options, following the same string-output rules as card-option templates:
+preferred. All templates explicitly opt in with `$`, just like card options.
+Ordinary `heading` strings and `heading.heading` values stay literal, even if they
+contain Jinja syntax. For templated text, use the shorthand:
+
+```yaml
+$heading: "Outdoor temperature: {{ states('sensor.outdoor_temperature') }} °C"
+```
+
+This normalizes internally to `heading: { $heading: ... }`. At either level, setting
+both `heading` and `$heading` in the same object is an error. The full form supports
+other templated options too, including nested actions and badges:
 
 ```yaml
 heading:
-  heading: "Outdoor temperature: {{ states('sensor.outdoor_temperature') }} °C"
+  $heading: "Outdoor temperature: {{ states('sensor.outdoor_temperature') }} °C"
   $icon: >-
     {{ 'mdi:snowflake' if states('sensor.outdoor_temperature') | float(0) < 0
        else 'mdi:thermometer' }}
@@ -473,13 +487,17 @@ Static headings need no template subscription. A templated main heading uses one
 shared subscription independently of selection, with `config` holding its static
 options; it has no implicit `entity` or group variables. Use explicit entity IDs
 with HA helpers. Badges receive live `hass` updates normally. An empty heading with
-no icon or badges takes no space. Headings with templates use YAML in the editor.
+no icon or badges takes no space. Heading and Card panels share the same visual
+editor behavior: safe templates show a stable rendered snapshot, static options
+remain editable, and template-controlled fields are protected. Use Heading YAML to
+change template sources; templated arrays and unsafe structural edits require YAML.
 
 Clearing a plain text heading removes it; icon-only and badge-only headings remain
 supported. The heading configuration does not affect entity selection.
 
-`group.heading` accepts the same string shorthand and native configuration as the
-main heading, including `$icon`, actions, and badges. Its only default-style
+`group.heading` accepts the same literal string shorthand and native configuration
+as the main heading, including `$heading`, `$icon`, actions, and badges. For templated
+text shorthand, use `group.$heading`. Its only default-style
 difference is `heading_style: subtitle`. Group heading configuration is edited in
 Selection YAML. A single group has no group heading. The old `group.title` option
 has been removed; use `group.heading`.
@@ -501,12 +519,12 @@ include:
 group: true
 ```
 
-| `group`                        | Meaning                                             |
-| ------------------------------ | --------------------------------------------------- |
-| Omitted / `false`              | One grid without group headings                     |
-| `true` / `{}` / `group`        | Group by the winning include's group label or index |
-| `area` (or another field)      | Group by that field's value                         |
-| `{ by: area, heading: "..." }` | Group by a field with a custom heading template     |
+| `group`                         | Meaning                                             |
+| ------------------------------- | --------------------------------------------------- |
+| Omitted / `false`               | One grid without group headings                     |
+| `true` / `{}` / `group`         | Group by the winning include's group label or index |
+| `area` (or another field)       | Group by that field's value                         |
+| `{ by: area, $heading: "..." }` | Group by a field with a custom heading template     |
 
 ```yaml
 # Group lights by their resolved area name
@@ -566,13 +584,13 @@ Available variables:
 ```yaml
 group:
   by: area
-  heading: "{{ group_name or 'Unassigned' }}"
+  $heading: "{{ group_name or 'Unassigned' }}"
 ```
 
 ```yaml
 group:
   by: label
-  heading: "{{ group | join(', ') or 'Unlabelled' }}"
+  $heading: "{{ group | join(', ') or 'Unlabelled' }}"
 ```
 
 Integration headings use friendly names when available, falling back to the raw

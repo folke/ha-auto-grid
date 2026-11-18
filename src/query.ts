@@ -689,17 +689,17 @@ function normalizeGroup(value: AutoGridConfig["group"]): GroupConfig | undefined
   const group = typeof value === "string" ? { by: value } : value
   object(group, "group")
   if ("title" in group) throw new Error("group.title is no longer supported; use group.heading")
-  if (Object.keys(group).some((key) => !["by", "heading"].includes(key)))
+  if (Object.keys(group).some((key) => !["by", "heading", "$heading"].includes(key)))
     throw new Error("Unknown group option")
   const by = group.by === undefined ? "group" : group.by
   if (by !== "group" && !isField(by)) throw new Error("Unknown group.by")
   const heading = headingConfig(
-    {
-      heading:
-        group.heading === undefined
-          ? "{{ group_name }}"
-          : (group.heading as AutoGridConfig["heading"]),
-    },
+    group.heading === undefined && group.$heading === undefined
+      ? { $heading: "{{ group_name }}" }
+      : {
+          $heading: group.$heading as string | undefined,
+          heading: group.heading as AutoGridConfig["heading"],
+        },
     "subtitle"
   ) ?? { heading: "", heading_style: "subtitle", type: "heading" }
   return { by, heading }

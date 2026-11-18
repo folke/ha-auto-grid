@@ -145,8 +145,9 @@ queries scoped, and disconnecting the parent cleans up connected child consumers
 Main and group headings are actual native heading cards. They are retained and
 reconfigured only when their options change; ordinary `hass` updates are forwarded.
 The main heading is independent of the selection query. Group headings accept the same configuration as the main heading, defaulting to
-Subtitle instead of Title style. Text containing Jinja delimiters is implicitly
-templated; other properties use `$`. Group headings render in the selection query,
+Subtitle instead of Title style. All properties, including heading text, explicitly
+opt into templates with `$`. A root `$heading` string normalizes to a heading config
+containing `$heading`; ordinary text is literal. Group headings render in the selection query,
 with `entity` always an entity ID string. Main heading templates have no implicit
 entity/group context. They use the shared subscription machinery and registry
 invalidation, and disconnect with the card. Single-group headings remain hidden.
@@ -174,9 +175,33 @@ disconnect or in card-YAML mode. Manual entity-picker changes remain editor-loca
 no sample is persisted as `card.entity` or added to selection.
 
 Selection edits own only `include`, `exclude`, `group`, `sort`, and `limit`. Card edits
-own only the global `card`. Other root fields survive these changes. `$` properties
-force card-only YAML so native editors never receive unknown templated keys;
-ordinary Mushroom Jinja strings pass through untouched.
+own only the global `card`. Other root fields survive these changes. Safe object
+`$` properties use a frozen rendered snapshot; visual edits are diffed against that
+snapshot and merged into original static options while preserving template sources.
+Initialization events can establish native defaults in the snapshot without saving
+them. Template-controlled edits are restored with feedback. Arrays containing templates,
+templated card types, and unsafe structural changes require YAML. Native editors never
+receive `$` keys; ordinary Mushroom Jinja strings pass through untouched.
+
+The Heading and Card panels both instantiate `src/option-editor.ts`. It owns native/
+YAML switching, rendered snapshots, initialization guards, template protection,
+structural checks, errors, and subscription cleanup. The parent editor only handles
+configuration ownership and the grid's entity selection/sample context. Heading
+snapshots use the same shared standalone subscription as their live preview, without
+an implicit entity context.
+
+## 🪄 Auto Card
+
+`custom:auto-card` wraps one child without selection or a grid. It shares the option
+compiler, subscription pool, heading renderer, card helpers, and visual editor with
+Auto Grid. Standalone card templates receive static `config` and its optional
+`entity` shorthand; headings retain their own context. Static cards do not subscribe.
+
+Each child/heading slot is keyed by its effective configuration and card type.
+Generation and revision guards discard stale subscription callbacks and pending
+helper results. Retained children receive ordinary `hass` updates without template
+or configuration work. Child grid hints are merged with its explicit `grid_options`,
+and numeric rows account for the optional heading. See [Auto Card](auto-card.md).
 
 ## ⚠️ Configuration Warnings
 

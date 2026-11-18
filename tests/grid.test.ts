@@ -212,7 +212,7 @@ test("retry recovers shared selection and heading errors for both grids", async 
   const f = fixture()
   const config = normalizeConfig({
     include: { entity: "light.a" },
-    heading: "{{ states('sensor.count') }}",
+    $heading: "{{ states('sensor.count') }}",
   })
   f.grid.configure(config)
   const other = new GridController(
@@ -585,7 +585,7 @@ test("main heading templates are shared independently of selection and release o
   const f = fixture()
   const config = normalizeConfig({
     include: { entity: "light.a" },
-    heading: { heading: "{{ states('sensor.count') }}", $icon: "mdi:lightbulb" },
+    heading: { $heading: "{{ states('sensor.count') }}", $icon: "mdi:lightbulb" },
   })
   f.grid.configure(config)
   const other = new GridController(

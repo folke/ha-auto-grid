@@ -12,10 +12,14 @@ function visit(value: unknown, transform: (node: Node) => Node, depth = 0): unkn
   )
 }
 
-export function validateCardOptions(card: unknown): asserts card is Partial<CardConfig> {
+export function validateCardOptions(
+  card: unknown,
+  reserveEntity = true
+): asserts card is Partial<CardConfig> {
   if (!card || typeof card !== "object" || Array.isArray(card))
     throw new Error("card must be an object")
-  if ("entity" in card || "$entity" in card) throw new Error("card.entity is supplied by the query")
+  if (reserveEntity && ("entity" in card || "$entity" in card))
+    throw new Error("card.entity is supplied by the query")
   if ("type" in card && (typeof card.type !== "string" || !card.type.trim()))
     throw new Error("card.type must be a non-empty string")
   visit(card, (node) => {

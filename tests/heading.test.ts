@@ -49,15 +49,30 @@ test("heading shorthand and legacy title normalize to native cards without chang
   assert.equal(visibleHeading(headingConfig({ heading: { badges: heading.badges } })), true)
 })
 
-test("heading shorthand and object text share implicit templating; other options remain explicit", () => {
+test("heading shorthand and object text use explicit templates; ordinary Jinja-looking text stays literal", () => {
   const source = "{{ states('sensor.count') }}"
   const plans = [
-    headingConfig({ heading: source })!,
-    headingConfig({ heading: { heading: source } })!,
+    headingConfig({ $heading: source })!,
     headingConfig({ heading: { $heading: source } })!,
   ].map(compileHeadingOptions)
   plans.forEach((plan) => assert.deepEqual(plan, plans[0]))
-  assert.equal(compileHeadingOptions(headingConfig({ heading: "Literal" })!).templates.length, 0)
+  for (const input of [
+    { heading: "Literal" },
+    { heading: source },
+    { heading: { heading: source } },
+  ]) {
+    const literal = compileHeadingOptions(headingConfig(input)!)
+    assert.equal(literal.templates.length, 0)
+    assert.equal(literal.card.heading, typeof input.heading === "string" ? input.heading : source)
+  }
+  for (const config of [
+    { heading: "Static", $heading: source },
+    { heading: {}, $heading: source },
+    { title: "Legacy", $heading: source },
+    { $heading: 3 },
+    { $heading: null },
+  ])
+    assert.throws(() => normalizeConfig({ ...base, ...config }))
   const heading = headingConfig({
     heading: { heading: "Static", icon: source, $heading_style: "{{ 'subtitle' }}" },
   })!
@@ -125,6 +140,20 @@ test("heading editor preserves native options, migrates title only on edits, and
     assert.throws(() => updateHeading(config, invalid))
 })
 
+test("root heading template shorthand survives initialization and canonicalizes only on edits", () => {
+  const config = { ...base, $heading: "{{ states('sensor.count') }}" }
+  const original = structuredClone(config)
+  const value = headingEditorValue(config)
+  assert.equal(updateHeading(config, value), config)
+  const edited = updateHeading(config, { ...value, icon: "mdi:counter" })
+  assert.equal(edited.$heading, undefined)
+  assert.ok(edited.heading && typeof edited.heading !== "string")
+  assert.equal(edited.heading.$heading, config.$heading)
+  assert.equal(edited.heading.icon, "mdi:counter")
+  assert.deepEqual(config, original)
+  assert.equal(updateHeading(config, undefined).$heading, undefined)
+})
+
 test("empty native heading initialization is a no-op; clearing text preserves icons and badges", () => {
   for (const value of [
     { type: "heading" },
@@ -162,7 +191,7 @@ test("main heading query renders independently with static config and escaped st
     normalizeConfig({
       include: [],
       heading: {
-        heading: "{{ states('sensor.weather') }} / {{ config.get('entity', 'unset') }}",
+        $heading: "{{ states('sensor.weather') }} / {{ config.get('entity', 'unset') }}",
         $icon: "{{ 'mdi:' ~ states('sensor.icon') }}",
         target: "sensor.weather",
         badges: [{ type: "entity", $entity: "{{ config.target }}" }],

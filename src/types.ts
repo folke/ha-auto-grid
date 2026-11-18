@@ -5,7 +5,26 @@ export interface LovelaceCard extends HTMLElement {
   preview?: boolean
   layout?: string
   getCardSize?: () => number | Promise<number>
+  getGridOptions?: () => CardGridOptions
   setConfig?: (config: CardConfig) => void
+}
+
+export interface CardGridOptions {
+  columns?: number | "full"
+  rows?: number | "auto"
+  min_columns?: number
+  max_columns?: number
+  min_rows?: number
+  max_rows?: number
+  [key: string]: unknown
+}
+
+export interface AutoCardConfig {
+  type?: string
+  card: Partial<CardConfig>
+  $heading?: string
+  heading?: string | HeadingConfig
+  [key: string]: unknown
 }
 
 export interface TemplateResult {
@@ -59,6 +78,7 @@ export type SortField = Field
 
 export interface Group {
   by?: Field
+  $heading?: string
   heading?: string | HeadingConfig
 }
 
@@ -84,6 +104,7 @@ export type Columns = number | "auto" | "all" | `${number}px`
 
 export interface AutoGridConfig {
   type?: string
+  $heading?: string
   heading?: string | HeadingConfig
   title?: string
   columns?: Columns | `${number}`

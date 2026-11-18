@@ -76,7 +76,7 @@ test("query dependencies include metadata from filters, sorting, grouping, and e
   assert.deepEqual(deps({ card: { $icon: "mdi:lightbulb" } }), [])
   const all = ["entity", "device", "area", "floor", "label", "integration"]
   assert.deepEqual(deps({ card: { $name: "{{ entity }}" } }), all)
-  assert.deepEqual(deps({ group: { by: "state", heading: "{{ area_name(entity) }}" } }), all)
+  assert.deepEqual(deps({ group: { by: "state", $heading: "{{ area_name(entity) }}" } }), all)
   assert.deepEqual(
     deps({ card: { type: "custom:mushroom-template-card", primary: "{{ area_name(entity) }}" } }),
     []

@@ -1,10 +1,18 @@
 # 🧩 Auto Grid
 
-Automatic entity grids for Home Assistant.
+Automatic grids and backend templates for Home Assistant cards.
 
 **Auto Grid** selects entities and turns them into native tiles or your favorite
 custom cards. Keep shared card options in YAML, let Home Assistant handle selection,
 and stop maintaining lists of entities by hand.
+
+**Auto Card** makes an existing card's configuration reactive with backend Jinja—even
+when that card has no template support of its own. Both cards ship in `auto-grid.js`.
+
+| Card               | Use it for                                                            |
+| ------------------ | --------------------------------------------------------------------- |
+| `custom:auto-grid` | [Select entities and generate a grid of cards](docs/configuration.md) |
+| `custom:auto-card` | [Add templates to one native or custom card](docs/auto-card.md)       |
 
 **Coming from auto-entities?** See the [differences and migration guide](docs/auto-entities.md).
 
@@ -12,6 +20,8 @@ and stop maintaining lists of entities by hand.
 
 ## ✨ Features
 
+- **Template existing cards** — use Auto Card to render `$name`, `$icon`, nested
+  actions, and other string options through backend Jinja, without entity selection.
 - **Automatic selection** — filter by area, label, device, entity type, state,
   attributes, and more. Combine include rules with global exclusions.
 - **Backend filtering** — Home Assistant evaluates selection instead of repeating
@@ -65,6 +75,8 @@ and the shared `card:` configuration; selection rules remain YAML-based.
 
 ## ⚡ Quick Start
 
+### Auto Grid: generate cards
+
 Select the lights in an area and give every tile the same configuration:
 
 ```yaml
@@ -85,7 +97,26 @@ Results are sorted alphabetically by name by default, regardless of include rule
 An optional `heading` uses HA's native heading card with Title style by default.
 It hides together with the grid when empty and `show_empty` is false.
 
+### Auto Card: template one card
+
+```yaml
+type: custom:auto-card
+card:
+  type: tile
+  entity: light.pool
+  $name: >-
+    {{ 'Pool lights are on' if is_state(entity, 'on')
+       else 'Pool lights are off' }}
+```
+
+`card` is the inner card, with no grid or selection required. Template results are
+strings; ordinary unprefixed Mushroom templates pass through unchanged. See the
+[Auto Card guide](docs/auto-card.md) for context, headings, and editor behavior.
+
 ## ⚙️ Configuration
+
+The following options configure Auto Grid; Auto Card needs only `card` and an optional
+`heading`.
 
 Use `include` to select entities and `card` for shared child-card options. Rules in
 one filter are **AND**; a list of include filters is **OR**. The first matching
@@ -128,9 +159,11 @@ The native card's entity picker chooses a **preview sample**, not a saved entity
 selection rule. Use HA's outer code editor for other root options such as visibility
 or Styler settings. Invalid drafts leave the last valid configuration intact.
 
-Cards with `$` properties use card-only YAML to preserve templates. Unsupported
-visual editors fall back to YAML. Heading text automatically evaluates Jinja-looking
-strings; other heading options use `$` to opt in. Safe compatibility conversions
+Safe object-property templates can be edited alongside static options in the native
+card editor: it shows a stable rendered snapshot and preserves `$` sources. Templated
+arrays/types and unsupported editors use YAML. Heading uses the same editor and
+explicit template convention: `$heading: "{{ ... }}"` or `heading: { $heading: "{{ ... }}" }`.
+Ordinary heading text stays literal. Safe compatibility conversions
 show warnings above the preview without preventing rendering or rewriting saved YAML.
 No additional editor resource is needed.
 

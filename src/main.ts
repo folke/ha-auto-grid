@@ -1,4 +1,16 @@
 import { AutoGrid } from "./card.ts"
+import { AutoCard } from "./auto-card.ts"
+
+if (!customElements.get("auto-card")) {
+  customElements.define("auto-card", AutoCard)
+  window.customCards ??= []
+  window.customCards.push({
+    description: "Backend Jinja templates for any Home Assistant card",
+    name: "Auto Card",
+    preview: true,
+    type: "auto-card",
+  })
+}
 
 if (!customElements.get("auto-grid")) {
   customElements.define("auto-grid", AutoGrid)

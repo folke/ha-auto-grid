@@ -5,30 +5,16 @@ import { AutoGridEditor, prepareEditor } from "./editor.ts"
 import { normalizeConfig } from "./query.ts"
 import { visibleHeading } from "./heading.ts"
 import { minimumWidth } from "./layout.ts"
+import { loadHelpers } from "./helpers.ts"
 import type {
   AutoGridConfig,
   CardConfig,
-  CardHelpers,
   GridConfig,
   HomeAssistant,
   LovelaceCard,
 } from "./types.ts"
 
 type HeadingEntry = { signature: string; card?: LovelaceCard; error?: string }
-
-let helpers: Promise<CardHelpers> | undefined
-function loadHelpers(): Promise<CardHelpers> {
-  helpers ??= Promise.resolve()
-    .then(() => {
-      if (!window.loadCardHelpers) throw new Error("Home Assistant card helpers are not available")
-      return window.loadCardHelpers()
-    })
-    .catch((error: unknown) => {
-      helpers = undefined
-      throw error
-    })
-  return helpers
-}
 
 export class AutoGrid extends LitElement {
   private config?: GridConfig

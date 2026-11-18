@@ -1,6 +1,5 @@
 import { LitElement, css, html, nothing } from "lit"
 import type { TemplateResult } from "lit"
-import { keyed } from "lit/directives/keyed.js"
 import {
   cardEditorValue,
   headingEditorValue,
@@ -12,10 +11,20 @@ import {
   updateCard,
   updateLayout,
   updateSelection,
+  templateEditorInfo,
 } from "./editor-config.ts"
 import { normalizeConfig, normalizeResult } from "./query.ts"
 import { subscribeTemplate } from "./subscriptions.ts"
-import type { AutoGridConfig, CardConfig, GridConfig, Connection, HomeAssistant } from "./types.ts"
+import { compileCardOptions, renderCardOptions } from "./card-templates.ts"
+import { OptionEditor } from "./option-editor.ts"
+import type {
+  AutoCardConfig,
+  AutoGridConfig,
+  CardConfig,
+  GridConfig,
+  Connection,
+  HomeAssistant,
+} from "./types.ts"
 
 type YamlEditor = HTMLElement & { setValue: (value: unknown) => void }
 type Panel = "grid" | "heading" | "selection" | "card"
@@ -54,26 +63,20 @@ export class AutoGridEditor extends LitElement {
   static properties = { hass: { attribute: false }, lovelace: { attribute: false } }
   declare hass?: HomeAssistant
   declare lovelace?: unknown
+  protected singleCard = false
   private config?: AutoGridConfig
   private previewEntity?: string
   private automaticEntity?: string
   private manualEntity = false
   private previewError?: string
+  private renderedCard?: CardConfig
   private previewConfig?: AutoGridConfig
   private previewConnection?: Connection
   private previewKey?: string
   private releasePreview?: () => void
   private previewGeneration = 0
-  private code = !customElements.get("hui-card-element-editor")
-  private cardError?: string
   private layoutError?: string
-  private headingError?: string
-  private headingCode = !customElements.get("hui-card-element-editor")
-  private headingYaml?: YamlEditor
-  private lastHeading?: CardConfig
   private selectionError?: string
-  private notice?: string
-  private modeVersion = 0
   private expanded: Record<Panel, boolean> = {
     card: false,
     grid: false,
@@ -81,27 +84,21 @@ export class AutoGridEditor extends LitElement {
     selection: true,
   }
   private nativePanels = !!customElements.get("ha-expansion-panel")
-  private lastYaml?: Partial<CardConfig>
-  private yamlElement?: YamlEditor
   private lastSelection?: Record<string, unknown>
   private selectionElement?: YamlEditor
   private layoutValue?: Record<string, unknown>
 
-  setConfig(config: AutoGridConfig): void {
+  setConfig(input: AutoGridConfig | AutoCardConfig): void {
+    const config = this.singleCard
+      ? ({ ...input, include: [] } as AutoGridConfig)
+      : (input as AutoGridConfig)
     if (sameConfig(config, this.config)) return
     headingEditorValue(config)
-    const templatesChanged = hasCardTemplates(config.card) !== hasCardTemplates(this.config?.card)
+    if (!sameConfig(config.card, this.config?.card)) this.renderedCard = undefined
     this.config = structuredClone(config)
     this.layoutValue = layoutData(config)
-    this.cardError = undefined
     this.layoutError = undefined
     this.selectionError = undefined
-    this.headingError = undefined
-    if (templatesChanged) {
-      this.code = hasCardTemplates(config.card) || !customElements.get("hui-card-element-editor")
-      this.notice = undefined
-      this.modeVersion++
-    }
     this.requestUpdate()
   }
 
@@ -122,13 +119,27 @@ export class AutoGridEditor extends LitElement {
     this.previewConnection = undefined
     this.previewConfig = undefined
   }
-
   private get editorEntity(): string | undefined {
     return this.manualEntity ? this.previewEntity : this.automaticEntity
   }
+  private get cardEditor(): OptionEditor | null {
+    const editor = this.renderRoot.querySelector("auto-grid-option-editor.card-options")
+    return editor instanceof OptionEditor ? editor : null
+  }
 
   private syncPreview(): void {
-    if (!this.isConnected || !this.config || !this.hass || this.codeMode) {
+    if (this.singleCard) {
+      this.clearPreview()
+      return
+    }
+    if (
+      !this.isConnected ||
+      !this.config ||
+      !this.hass ||
+      !customElements.get("hui-card-element-editor") ||
+      !templateEditorInfo(this.config.card).safe ||
+      this.cardEditor?.codeMode
+    ) {
       this.clearPreview()
       return
     }
@@ -167,15 +178,49 @@ export class AutoGridEditor extends LitElement {
         error: (error) => {
           if (generation !== this.previewGeneration) return
           this.previewError = error.message
+          if (hasCardTemplates(this.config?.card) && !this.renderedCard)
+            this.cardEditor?.fallback(
+              `Could not render an editor snapshot: ${error.message}. Edit the YAML below.`
+            )
           this.requestUpdate()
         },
         result: (value) => {
           if (generation !== this.previewGeneration) return
           try {
-            this.automaticEntity = normalizeResult(value, compiled).matches[0]?.entity
+            const match = normalizeResult(value, compiled).matches.at(0)
+            this.automaticEntity = match?.entity
+            if (!match && hasCardTemplates(this.config?.card) && !this.renderedCard)
+              this.cardEditor?.fallback(
+                "No matching entity is available for a rendered editor snapshot. Edit the YAML below."
+              )
+            if (match && hasCardTemplates(this.config?.card) && !this.renderedCard) {
+              const effective = renderCardOptions(
+                query.cards[match.group],
+                query.templates[match.group],
+                match.values,
+                match.entity
+              )
+              const plan = compileCardOptions({ type: "tile", ...this.config?.card })
+              const values = plan.templates.map(({ path }) => {
+                let child: unknown = effective
+                for (const part of path)
+                  child = (child as Record<string | number, unknown> | undefined)?.[part]
+                return child
+              })
+              this.renderedCard = renderCardOptions(
+                plan.card,
+                plan.templates,
+                values as string[],
+                match.entity
+              )
+            }
             this.previewError = undefined
           } catch (error) {
             this.previewError = (error as Error).message
+            if (hasCardTemplates(this.config?.card) && !this.renderedCard)
+              this.cardEditor?.fallback(
+                `Could not render an editor snapshot: ${this.previewError}. Edit the YAML below.`
+              )
           }
           this.requestUpdate()
         },
@@ -189,14 +234,6 @@ export class AutoGridEditor extends LitElement {
     this.syncPreview()
   }
 
-  private get codeMode(): boolean {
-    return (
-      this.code ||
-      hasCardTemplates(this.config?.card) ||
-      !customElements.get("hui-card-element-editor")
-    )
-  }
-
   private emit(config: AutoGridConfig): void {
     if (!this.config || sameConfig(config, this.config)) return
     this.config = structuredClone(config)
@@ -204,7 +241,13 @@ export class AutoGridEditor extends LitElement {
       new CustomEvent("config-changed", {
         bubbles: true,
         composed: true,
-        detail: { config: structuredClone(config) },
+        detail: {
+          config: this.singleCard
+            ? Object.fromEntries(
+                Object.entries(structuredClone(config)).filter(([key]) => key !== "include")
+              )
+            : structuredClone(config),
+        },
       })
     )
     this.requestUpdate()
@@ -224,44 +267,26 @@ export class AutoGridEditor extends LitElement {
     this.requestUpdate()
   }
 
-  private changeHeading(event: CustomEvent): void {
+  private changeOptions(event: CustomEvent): void {
     event.stopPropagation()
     if (!this.config) return
-    const yaml = event.currentTarget === this.headingYaml
-    if (
-      !yaml &&
-      (this.headingCode ||
-        event.currentTarget !==
-          this.renderRoot.querySelector("hui-card-element-editor.heading-native"))
-    )
-      return
-    if (!yaml && (event.detail.error || event.detail.guiModeAvailable === false)) {
-      this.headingCode = true
-      this.requestUpdate()
-      return
+    try {
+      const heading = (event.currentTarget as OptionEditor).heading
+      const config = heading
+        ? updateHeading(this.config, event.detail.value)
+        : updateCard(this.config, event.detail.value, event.detail.visual, this.singleCard)
+      this.emit(config)
+    } catch (error) {
+      event.preventDefault()
+      event.detail.error = (error as Error).message
     }
-    if (yaml && event.detail.isValid === false)
-      // oxlint-disable-next-line typescript/prefer-nullish-coalescing -- Empty editor errors need a fallback.
-      this.headingError = event.detail.errorMsg || "Invalid heading YAML"
-    else {
-      try {
-        const config = updateHeading(this.config, yaml ? event.detail.value : event.detail.config)
-        this.headingError = undefined
-        if (yaml) this.lastHeading = headingEditorValue(config)
-        this.emit(config)
-      } catch (error) {
-        this.headingError = (error as Error).message
-      }
-    }
-    this.requestUpdate()
   }
 
   private changeSelection(event: CustomEvent): void {
     event.stopPropagation()
     if (!this.config || event.currentTarget !== this.selectionElement) return
     if (event.detail.isValid === false)
-      // oxlint-disable-next-line typescript/prefer-nullish-coalescing -- Empty editor errors need a fallback.
-      this.selectionError = event.detail.errorMsg || "Invalid selection YAML"
+      this.selectionError = event.detail.errorMsg ?? "Invalid selection YAML"
     else {
       try {
         const config = updateSelection(this.config, event.detail.value)
@@ -275,86 +300,16 @@ export class AutoGridEditor extends LitElement {
     this.requestUpdate()
   }
 
-  private changeNative(event: CustomEvent): void {
+  private modeChanged(event: Event): void {
     event.stopPropagation()
-    if (
-      !this.config ||
-      this.codeMode ||
-      event.currentTarget !== this.renderRoot.querySelector("hui-card-element-editor.card-native")
-    )
-      return
-    if (event.detail.error || event.detail.guiModeAvailable === false) {
-      this.notice =
-        // oxlint-disable-next-line typescript/prefer-nullish-coalescing -- Empty editor errors need a fallback.
-        event.detail.error ||
-        "This card does not support visual editing. Its YAML is preserved below."
-      this.code = true
-      this.modeVersion++
-      this.requestUpdate()
-      return
+    if (event.currentTarget === this.cardEditor) {
+      this.renderedCard = undefined
+      this.previewConfig = undefined
     }
-    const value = event.detail.config
-    if (!value || typeof value !== "object" || Array.isArray(value)) return
-    if (Object.hasOwn(value, "entity") && value.entity !== this.editorEntity) {
-      this.previewEntity = typeof value.entity === "string" ? value.entity : undefined
-      this.manualEntity = true
-    }
-    try {
-      const config = updateCard(this.config, value, true)
-      this.cardError = undefined
-      this.emit(config)
-    } catch (error) {
-      this.cardError = (error as Error).message
-    }
-    this.requestUpdate()
-  }
-
-  private changeYaml(event: CustomEvent): void {
-    event.stopPropagation()
-    if (!this.config || !this.codeMode || event.currentTarget !== this.yamlElement) return
-    if (event.detail.isValid === false)
-      // oxlint-disable-next-line typescript/prefer-nullish-coalescing -- Empty editor errors need a fallback.
-      this.cardError = event.detail.errorMsg || "Invalid card YAML"
-    else {
-      try {
-        const config = updateCard(this.config, event.detail.value)
-        this.cardError = undefined
-        this.lastYaml = structuredClone(config.card ?? {})
-        this.emit(config)
-      } catch (error) {
-        this.cardError = (error as Error).message
-      }
-    }
-    this.requestUpdate()
-  }
-
-  private toggleMode(): void {
-    this.code = !this.codeMode
-    this.notice = undefined
-    this.cardError = undefined
-    this.modeVersion++
     this.requestUpdate()
   }
 
   protected updated(): void {
-    const heading = this.renderRoot.querySelector<YamlEditor>("ha-yaml-editor.heading-yaml")
-    if (heading && this.config) {
-      const value = headingEditorValue(this.config)
-      if (heading !== this.headingYaml || !sameConfig(value, this.lastHeading)) {
-        this.headingYaml = heading
-        this.lastHeading = structuredClone(value)
-        heading.setValue(structuredClone(value))
-      }
-    }
-    if (!heading) this.headingYaml = undefined
-    const editor = this.renderRoot.querySelector<YamlEditor>("ha-yaml-editor.card-yaml")
-    const value = this.config?.card ?? {}
-    if (editor && (editor !== this.yamlElement || !sameConfig(this.lastYaml, value))) {
-      this.yamlElement = editor
-      this.lastYaml = structuredClone(value)
-      editor.setValue(structuredClone(value))
-    }
-    if (!editor) this.yamlElement = undefined
     const selection = this.renderRoot.querySelector<YamlEditor>("ha-yaml-editor.selection-yaml")
     const data = this.config ? selectionData(this.config) : {}
     if (
@@ -376,7 +331,7 @@ export class AutoGridEditor extends LitElement {
       this.requestUpdate()
     }
     if (this.nativePanels)
-      return html` <ha-expansion-panel
+      return html`<ha-expansion-panel
         class=${name}
         outlined
         .header=${title}
@@ -392,8 +347,8 @@ export class AutoGridEditor extends LitElement {
       class=${name}
       ?open=${this.expanded[name]}
       @toggle=${(event: Event) => {
-        if (event.target !== event.currentTarget) return
-        this.expanded[name] = (event.target as HTMLDetailsElement).open
+        if (event.target === event.currentTarget)
+          this.expanded[name] = (event.target as HTMLDetailsElement).open
       }}
     >
       <summary>${title}</summary>
@@ -401,148 +356,85 @@ export class AutoGridEditor extends LitElement {
     </details>`
   }
 
-  /* oxlint-disable typescript/unbound-method -- Lit calls event handlers with the component as this. */
+  /* oxlint-disable typescript/unbound-method -- Lit binds handlers to the host. */
   protected render() {
     if (!this.config || !this.hass) return nothing
-    const templates = hasCardTemplates(this.config.card)
-    const heading = headingEditorValue(this.config)
-    const headingTemplates =
-      hasCardTemplates(heading) ||
-      (typeof heading.heading === "string" && /{{|{%/.test(heading.heading))
-    const headingCode = this.headingCode || headingTemplates
-    const nativeAvailable = !!customElements.get("hui-card-element-editor")
-    const code = this.codeMode
-    let cardHint: TemplateResult | typeof nothing = nothing
-    if (templates)
-      cardHint = html`<p class="hint">
-        This card uses <code>$</code> templates. Edit its YAML to preserve them.
-      </p>`
-    else if (!nativeAvailable)
-      cardHint = html`<p class="hint">
-        HA's visual card editor is unavailable. Edit the card YAML below.
-      </p>`
+    let nativeValue = cardEditorValue(this.config, this.editorEntity)
+    if (this.singleCard) nativeValue = { type: "tile", ...this.config.card }
+    else if (hasCardTemplates(this.config.card)) nativeValue = this.renderedCard!
     return html`
-      ${this.panel(
-        "grid",
-        "Grid",
-        html`
-          <ha-form
-            .hass=${this.hass}
-            .schema=${layoutSchema}
-            .data=${this.layoutValue ?? layoutData(this.config)}
-            .computeLabel=${(field: { name: string }) => labels[field.name] ?? field.name}
-            .computeHelper=${(field: { name: string }) => (field.name === "columns" ? "auto: wrap at 140px · all: one row · 1–24: fixed count · e.g. 180px: wrap at that minimum width" : "")}
-            @value-changed=${this.changeLayout}
-          ></ha-form>
-          ${this.layoutError ? html`<p class="error" role="alert">${this.layoutError}</p>` : nothing}
-        `
-      )}
-      ${this.panel(
-        "heading",
-        "Heading",
-        html`
-          <div class="toolbar">
-            <button
-              ?disabled=${!nativeAvailable || headingTemplates || (this.headingCode && !!this.headingError)}
-              @click=${() => {
-                this.headingCode = !this.headingCode
-                this.headingError = undefined
-                this.requestUpdate()
-              }}
-            >
-              ${headingCode ? "Visual editor" : "Heading YAML"}
-            </button>
-          </div>
-          ${
-            headingCode
-              ? html`<ha-yaml-editor
-                  class="heading-yaml"
+      ${
+        this.singleCard
+          ? nothing
+          : this.panel(
+              "grid",
+              "Grid",
+              html`
+                <ha-form
                   .hass=${this.hass}
-                  .defaultValue=${headingEditorValue(this.config)}
-                  @value-changed=${this.changeHeading}
-                ></ha-yaml-editor>`
-              : html` <hui-card-element-editor
-                  class="heading-native"
-                  .hass=${this.hass}
-                  .lovelace=${this.lovelace}
-                  .value=${headingEditorValue(this.config)}
-                  .showVisibilityTab=${false}
-                  @GUImode-changed=${(event: Event) => event.stopPropagation()}
-                  @config-changed=${this.changeHeading}
-                ></hui-card-element-editor>`
-          }
-          ${headingTemplates ? html`<p class="hint">This heading uses templates. Edit its YAML to preserve them.</p>` : nothing}
-          ${this.headingError ? html`<p class="error" role="alert">${this.headingError}</p>` : nothing}
-        `
-      )}
-      ${this.panel(
-        "selection",
-        "Selection",
-        html`
-          <p class="hint">
-            Include, exclude, group, sort, and limit. Use HA's full code editor for other root
-            options.
-          </p>
-          <div class="selection-editor">
-            <ha-yaml-editor
-              class="selection-yaml"
-              .hass=${this.hass}
-              .defaultValue=${selectionData(this.config)}
-              @value-changed=${this.changeSelection}
-            ></ha-yaml-editor>
-          </div>
-          ${this.selectionError ? html`<p class="error" role="alert">${this.selectionError}</p>` : nothing}
-        `
-      )}
+                  .schema=${layoutSchema}
+                  .data=${this.layoutValue ?? layoutData(this.config)}
+                  .computeLabel=${(field: { name: string }) => labels[field.name] ?? field.name}
+                  .computeHelper=${(field: { name: string }) => (field.name === "columns" ? "auto: wrap at 140px · all: one row · 1–24: fixed count · e.g. 180px: wrap at that minimum width" : "")}
+                  @value-changed=${this.changeLayout}
+                ></ha-form>
+                ${this.layoutError ? html`<p class="error" role="alert">${this.layoutError}</p>` : nothing}
+              `
+            )
+      }
+      ${this.panel("heading", "Heading", html`<auto-grid-option-editor class="heading-options" .heading=${true} .hass=${this.hass} .lovelace=${this.lovelace} .value=${headingEditorValue(this.config)} @options-changed=${this.changeOptions} @mode-changed=${this.modeChanged}></auto-grid-option-editor>`)}
+      ${
+        this.singleCard
+          ? nothing
+          : this.panel(
+              "selection",
+              "Selection",
+              html`
+                <p class="hint">
+                  Include, exclude, group, sort, and limit. Use HA's full code editor for other root
+                  options.
+                </p>
+                <div class="selection-editor">
+                  <ha-yaml-editor
+                    class="selection-yaml"
+                    .hass=${this.hass}
+                    .defaultValue=${selectionData(this.config)}
+                    @value-changed=${this.changeSelection}
+                  ></ha-yaml-editor>
+                </div>
+                ${this.selectionError ? html`<p class="error" role="alert">${this.selectionError}</p>` : nothing}
+              `
+            )
+      }
       ${this.panel(
         "card",
         "Card",
         html`
-          <div class="toolbar">
-            <button
-              ?disabled=${templates || !nativeAvailable || (code && !!this.cardError)}
-              @click=${this.toggleMode}
-            >
-              ${code ? "Visual editor" : "Card YAML"}
-            </button>
-          </div>
-          ${cardHint} ${this.notice ? html`<p class="hint">${this.notice}</p>` : nothing}
-          ${
-            code
-              ? keyed(
-                  `yaml-${this.modeVersion}`,
-                  html`<ha-yaml-editor
-                    class="card-yaml"
-                    .hass=${this.hass}
-                    .defaultValue=${structuredClone(this.config.card ?? {})}
-                    @value-changed=${this.changeYaml}
-                  ></ha-yaml-editor>`
-                )
-              : html`
-                  <p class="hint">
-                    The entity is an editor sample, initially the first match; it is never saved.
-                  </p>
-                  ${this.previewError ? html`<p class="hint">Could not select an editor sample: ${this.previewError}</p>` : nothing}
-                  ${keyed(
-                    `native-${this.modeVersion}`,
-                    html`<hui-card-element-editor
-                      class="card-native"
-                      .hass=${this.hass}
-                      .lovelace=${this.lovelace}
-                      .value=${cardEditorValue(this.config, this.editorEntity)}
-                      .showVisibilityTab=${false}
-                      @GUImode-changed=${(event: Event) => event.stopPropagation()}
-                      @config-changed=${this.changeNative}
-                    ></hui-card-element-editor>`
-                  )}
-                `
-          }
-          ${this.cardError ? html`<p class="error" role="alert">${this.cardError}</p>` : nothing}
+          ${this.singleCard ? nothing : html`<p class="hint">The entity is an editor sample, initially the first match; it is never saved.</p>`}
+          ${this.previewError ? html`<p class="hint">Could not select an editor sample: ${this.previewError}</p>` : nothing}
+          <auto-grid-option-editor
+            class="card-options"
+            .hass=${this.hass}
+            .lovelace=${this.lovelace}
+            .value=${this.config.card ?? {}}
+            .nativeValue=${nativeValue}
+            .external=${!this.singleCard}
+            .reserveEntity=${!this.singleCard}
+            .requireType=${this.singleCard}
+            @options-changed=${this.changeOptions}
+            @mode-changed=${this.modeChanged}
+            @sample-changed=${(event: CustomEvent) => {
+              event.stopPropagation()
+              this.previewEntity =
+                typeof event.detail.entity === "string" ? event.detail.entity : undefined
+              this.manualEntity = true
+              this.requestUpdate()
+            }}
+          ></auto-grid-option-editor>
         `
       )}
     `
   }
-
   /* oxlint-enable typescript/unbound-method */
 
   static styles = css`
@@ -577,27 +469,9 @@ export class AutoGridEditor extends LitElement {
       color: var(--secondary-text-color);
       font-size: 0.9em;
     }
-    .toolbar {
-      display: flex;
-      justify-content: flex-end;
-      margin-bottom: 12px;
-    }
     .error {
       color: var(--error-color, #db4437);
       margin-top: 12px;
-    }
-    button {
-      padding: 8px 12px;
-      border: 1px solid var(--divider-color, #888);
-      border-radius: 8px;
-      background: transparent;
-      color: var(--primary-color);
-      cursor: pointer;
-      font: inherit;
-    }
-    button:disabled {
-      cursor: default;
-      opacity: 0.5;
     }
     details {
       border: 1px solid var(--outline-color, #ccc);
@@ -611,5 +485,10 @@ export class AutoGridEditor extends LitElement {
   `
 }
 
+export class AutoCardEditor extends AutoGridEditor {
+  protected singleCard = true
+}
+if (!customElements.get("auto-card-editor"))
+  customElements.define("auto-card-editor", AutoCardEditor)
 if (!customElements.get("auto-grid-editor"))
   customElements.define("auto-grid-editor", AutoGridEditor)

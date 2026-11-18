@@ -2,11 +2,17 @@ import { compileCardOptions, mergeCardOptions, validateCardOptions } from "./car
 import type { AutoGridConfig, CardConfig } from "./types.ts"
 
 export function headingConfig(
-  config: Pick<AutoGridConfig, "heading" | "title">,
+  config: Pick<AutoGridConfig, "heading" | "$heading" | "title">,
   style: "title" | "subtitle" = "title"
 ): CardConfig | undefined {
   if (config.title !== undefined && typeof config.title !== "string")
     throw new Error("title must be a string")
+  if (config.$heading !== undefined) {
+    if (typeof config.$heading !== "string") throw new Error("$heading must be a template string")
+    if (config.heading !== undefined || config.title !== undefined)
+      throw new Error("Use heading or $heading, not both")
+    return headingConfig({ heading: { $heading: config.$heading } }, style)
+  }
   if (config.title !== undefined && config.heading !== undefined)
     throw new Error("Use heading or title, not both")
   // Only undefined falls back; null must still fail validation.
@@ -39,13 +45,7 @@ export function validateHeading(value: CardConfig): CardConfig {
 }
 
 export function compileHeadingOptions(config: CardConfig): ReturnType<typeof compileCardOptions> {
-  const card = Object.fromEntries(
-    Object.entries(config).map(([key, value]) => [
-      key === "heading" && typeof value === "string" && /{{|{%/.test(value) ? "$heading" : key,
-      value,
-    ])
-  ) as CardConfig
-  return compileCardOptions(card)
+  return compileCardOptions(config)
 }
 
 export function visibleHeading(config?: CardConfig): boolean {

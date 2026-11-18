@@ -16,14 +16,14 @@ test("group configuration normalizes shorthand and validates fields", () => {
   for (const group of [true, {}, { by: "group" }, "group"]) {
     assert.deepEqual(normalizeConfig({ include: selection, group }).query.group, {
       by: "group",
-      heading: { type: "heading", heading_style: "subtitle", heading: "{{ group_name }}" },
+      heading: { type: "heading", heading_style: "subtitle", $heading: "{{ group_name }}" },
     })
   }
   assert.equal(normalizeConfig({ include: selection }).query.group, undefined)
   assert.equal(normalizeConfig({ include: selection, group: false }).query.group, undefined)
   assert.deepEqual(normalizeConfig({ include: selection, group: "area" }).query.group, {
     by: "area",
-    heading: { type: "heading", heading_style: "subtitle", heading: "{{ group_name }}" },
+    heading: { type: "heading", heading_style: "subtitle", $heading: "{{ group_name }}" },
   })
   for (const group of [
     null,
@@ -47,6 +47,26 @@ test("group configuration normalizes shorthand and validates fields", () => {
     normalizeConfig({ include: selection, group: false }).query.template,
     normalizeConfig({ include: selection }).query.template
   )
+})
+
+test("group heading templates require explicit dollar keys and preserve literal strings", () => {
+  const source = "{{ group_name }}"
+  const shorthand = normalizeConfig({ include: selection, group: { by: "area", $heading: source } })
+  const full = normalizeConfig({
+    include: selection,
+    group: { by: "area", heading: { $heading: source } },
+  })
+  assert.deepEqual(shorthand.query, full.query)
+  const literal = normalizeConfig({ include: selection, group: { by: "area", heading: source } })
+  assert.equal(literal.query.group!.heading.heading, source)
+  assert.equal(literal.query.group!.heading.$heading, undefined)
+  for (const group of [
+    { heading: "Static", $heading: source },
+    { heading: {}, $heading: source },
+    { $heading: null },
+    { $heading: 3 },
+  ])
+    assert.throws(() => normalizeConfig({ include: selection, group }))
 })
 
 test("grouped results validate types and retain number/string/boolean identities", () => {
@@ -215,7 +235,7 @@ test(
           include: selection,
           group: {
             by: "area",
-            heading: "{{ group_name or 'Other' }}: {{ entity }} / {{ states[entity].name }}",
+            $heading: "{{ group_name or 'Other' }}: {{ entity }} / {{ states[entity].name }}",
           },
         },
         [
@@ -227,7 +247,7 @@ test(
       [
         {
           include: selection,
-          group: { heading: "{% if group == 'Lights' %}Lighting{% else %}Other{% endif %}" },
+          group: { $heading: "{% if group == 'Lights' %}Lighting{% else %}Other{% endif %}" },
         },
         [
           section("Lights", "Lighting", "light.a", "light.c"),
@@ -325,7 +345,7 @@ test(
         by: "entity",
         heading: {
           area: "configured",
-          heading:
+          $heading:
             "{{ entity }} / {{ group_name }} / {{ states(entity) }} / {{ group_count }} / {{ area is undefined }} / {{ area_name(entity) }} / {{ area_id(entity) }} / {{ config.area }}",
           $icon: "{{ 'mdi:lightbulb-on' if states(entity) == 'on' else 'mdi:lightbulb' }}",
           heading_style: "title",

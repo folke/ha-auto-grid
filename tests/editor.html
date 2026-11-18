@@ -16,6 +16,21 @@
       }
       const emit = (target, name, detail) =>
         target.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true }))
+      const query = (root, selector) => {
+        const direct = root.querySelector(selector)
+        if (direct) return direct
+        for (const child of root.querySelectorAll("*")) {
+          if (!child.shadowRoot) continue
+          const found = query(child.shadowRoot, selector)
+          if (found) return found
+        }
+        return null
+      }
+      const text = (root) =>
+        root.textContent +
+        [...root.querySelectorAll("*")]
+          .map((child) => (child.shadowRoot ? text(child.shadowRoot) : ""))
+          .join("")
       try {
         customElements.define("ha-form", class extends HTMLElement {})
         customElements.define(
@@ -140,7 +155,7 @@
         }
         const missing = await makeEditor(base)
         assert(
-          missing.editor.shadowRoot.querySelector("ha-yaml-editor.card-yaml"),
+          query(missing.editor.shadowRoot, "ha-yaml-editor.card-yaml"),
           "missing native editor falls back to card YAML"
         )
         assert(
@@ -162,10 +177,10 @@
         const main = await makeEditor(base, true)
         const { editor, changes } = main
         const root = editor.shadowRoot
-        const content = root.querySelector("ha-expansion-panel.grid")
-        const selectionPanel = root.querySelector("ha-expansion-panel.selection")
-        const cardPanel = root.querySelector("ha-expansion-panel.card")
-        const headingPanel = root.querySelector("ha-expansion-panel.heading")
+        const content = query(root, "ha-expansion-panel.grid")
+        const selectionPanel = query(root, "ha-expansion-panel.selection")
+        const cardPanel = query(root, "ha-expansion-panel.card")
+        const headingPanel = query(root, "ha-expansion-panel.heading")
         assert(
           !content.expanded &&
             !headingPanel.expanded &&
@@ -173,21 +188,21 @@
             !cardPanel.expanded,
           "Grid/Heading/Card start collapsed and Selection starts expanded"
         )
-        const selection = root.querySelector("ha-yaml-editor.selection-yaml")
+        const selection = query(root, "ha-yaml-editor.selection-yaml")
         assert(
           JSON.stringify(Object.keys(selection.value)) ===
             JSON.stringify(["include", "exclude", "group", "sort"]),
           "selection YAML contains only query fields"
         )
         assert(
-          !root.querySelector(".preview-entity") && root.querySelectorAll("ha-form").length === 1,
+          !query(root, ".preview-entity") && root.querySelectorAll("ha-form").length === 1,
           "duplicate entity selector has been removed"
         )
         assert(queries().length === 1, "editor sample and live preview share one backend query")
         const firstQuery = queries()[0]
         firstQuery.callback({ result: result(base, ["light.preview", "light.other"]) })
         await tick()
-        let native = root.querySelector("hui-card-element-editor.card-native")
+        let native = query(root, "hui-card-element-editor.card-native")
         assert(
           native?.hass === hass && native.lovelace === editor.lovelace,
           "native editor receives HA context"
@@ -204,14 +219,14 @@
           changes.length === 0 && JSON.stringify(base) === JSON.stringify(before),
           "opening panels and choosing the automatic sample don't rewrite config"
         )
-        content.shadowRoot.querySelector("button").click()
-        cardPanel.shadowRoot.querySelector("button").click()
+        query(content.shadowRoot, "button").click()
+        query(cardPanel.shadowRoot, "button").click()
         await tick()
         assert(
           content.expanded && selectionPanel.expanded && cardPanel.expanded,
           "panels expand independently"
         )
-        const headingStyle = () => getComputedStyle(content.shadowRoot.querySelector("button"))
+        const headingStyle = () => getComputedStyle(query(content.shadowRoot, "button"))
         assert(
           headingStyle().borderTopLeftRadius === "12px" &&
             headingStyle().borderBottomLeftRadius === "0px",
@@ -224,7 +239,7 @@
           "heading rounding follows the HA theme radius"
         )
         editor.style.removeProperty("--ha-card-border-radius")
-        const selectionWrapper = root.querySelector(".selection-editor")
+        const selectionWrapper = query(root, ".selection-editor")
         selection.style.cssText = "display:block;height:500px"
         assert(
           selectionWrapper.clientHeight >= 500 &&
@@ -232,7 +247,7 @@
           "selection YAML grows naturally without a second scroll container or clipped toolbar"
         )
         selection.style.cssText = ""
-        const layout = root.querySelector("ha-form")
+        const layout = query(root, "ha-form")
         assert(
           layout.schema[0].name === "columns" &&
             !!layout.schema[0].selector.text &&
@@ -285,8 +300,8 @@
         editor.setConfig(changes[0])
         await tick()
         assert(
-          root.querySelector("hui-card-element-editor.card-native") === native &&
-            root.querySelector("ha-yaml-editor.selection-yaml") === selection,
+          query(root, "hui-card-element-editor.card-native") === native &&
+            query(root, "ha-yaml-editor.selection-yaml") === selection,
           "config echoes retain both child editors"
         )
         const subscriptionsBeforeLayout = queries().length
@@ -303,8 +318,8 @@
           queries().length === subscriptionsBeforeLayout,
           "layout/static card edits don't reopen sample or preview queries"
         )
-        assert(!headingPanel.querySelector("ha-form"), "Heading has no redundant show toggle")
-        const headingNative = root.querySelector("hui-card-element-editor.heading-native")
+        assert(!query(headingPanel, "ha-form"), "Heading has no redundant show toggle")
+        const headingNative = query(root, "hui-card-element-editor.heading-native")
         assert(
           headingNative.value.type === "heading" && headingNative.value.heading_style === "title",
           "Heading panel embeds the native title-style editor"
@@ -335,7 +350,7 @@
         )
         assert(
           queries().length === subscriptionsBeforeLayout &&
-            root.querySelector("hui-card-element-editor.card-native") === native,
+            query(root, "hui-card-element-editor.card-native") === native,
           "heading edits preserve selection subscriptions and the child card editor"
         )
         const saved = changes.length
@@ -343,13 +358,13 @@
         await tick()
         assert(
           changes.length === saved &&
-            content.querySelector('[role="alert"]').textContent.includes("columns"),
+            query(content, '[role="alert"]').textContent.includes("columns"),
           "invalid layout stays local"
         )
         emit(layout, "value-changed", { value: { ...layout.data, columns: "3" } })
         await tick()
         assert(
-          changes.at(-1).columns === 3 && !content.querySelector('[role="alert"]'),
+          changes.at(-1).columns === 3 && !query(content, '[role="alert"]'),
           "valid layout recovers"
         )
         emit(layout, "value-changed", { value: { ...layout.data, columns: "180px" } })
@@ -366,7 +381,7 @@
         await tick()
         assert(
           changes.length === beforeOversizedColumns &&
-            content.querySelector('[role="alert"]').textContent.includes("180px"),
+            query(content, '[role="alert"]').textContent.includes("180px"),
           "oversized counts show an inline pixel-width hint without saving"
         )
         emit(layout, "value-changed", { value: { ...layout.data, columns: "3" } })
@@ -379,8 +394,8 @@
           errorMsg: "Broken selection YAML",
         })
         await tick()
-        selectionPanel.shadowRoot.querySelector("button").click()
-        cardPanel.shadowRoot.querySelector("button").click()
+        query(selectionPanel.shadowRoot, "button").click()
+        query(cardPanel.shadowRoot, "button").click()
         editor.hass = { ...hass }
         await tick()
         assert(
@@ -389,12 +404,11 @@
         )
         assert(
           selection.writes === selectionWrites &&
-            selectionPanel.querySelector('[role="alert"]').textContent === "Broken selection YAML",
+            query(selectionPanel, '[role="alert"]').textContent === "Broken selection YAML",
           "collapsing preserves invalid selection drafts"
         )
         assert(
-          root.querySelector("hui-card-element-editor.card-native") === native &&
-            native.isConnected,
+          query(root, "hui-card-element-editor.card-native") === native && native.isConnected,
           "collapsed card editor stays mounted"
         )
         emit(selection, "value-changed", {
@@ -429,7 +443,7 @@
         )
         assert(
           JSON.stringify(changedSelection.include) === JSON.stringify(base.include) &&
-            !selectionPanel.querySelector('[role="alert"]'),
+            !query(selectionPanel, '[role="alert"]'),
           "per-include cards round-trip through selection YAML"
         )
         assert(
@@ -441,10 +455,10 @@
         await tick()
         assert(native.value.entity === "light.preview", "manual sample survives selection changes")
         const newWrites = selection.writes
-        cardPanel.shadowRoot.querySelector("button").click()
-        cardPanel.querySelector("button").click()
+        query(cardPanel.shadowRoot, "button").click()
+        query(cardPanel, "button").click()
         await tick()
-        let yaml = root.querySelector("ha-yaml-editor.card-yaml")
+        let yaml = query(root, "ha-yaml-editor.card-yaml")
         assert(yaml && !("entity" in yaml.value), "card YAML contains only saved options")
         assert(selection.writes === newWrites, "switching card modes doesn't reset selection YAML")
         const staleNative = native
@@ -462,11 +476,11 @@
         assert(
           changes.length === beforeStale &&
             yaml.writes === invalidWrites &&
-            cardPanel.querySelector('[role="alert"]').textContent === "Broken card YAML",
+            query(cardPanel, '[role="alert"]').textContent === "Broken card YAML",
           "invalid card drafts stay mounted and unsaved"
         )
         assert(
-          cardPanel.querySelector("button").disabled,
+          query(cardPanel, "button").disabled,
           "invalid card YAML cannot be silently discarded by switching modes"
         )
         const dynamic = { type: "tile", tap_action: { action: "url", $url_path: "{{ entity }}" } }
@@ -474,11 +488,11 @@
         await tick()
         assert(
           JSON.stringify(changes.at(-1).card) === JSON.stringify(dynamic) &&
-            cardPanel.querySelector("button").disabled,
-          "$ options stay literal and force safe card YAML"
+            !query(cardPanel, "button").disabled,
+          "$ options stay literal and safe object templates allow switching to visual editing"
         )
         assert(
-          !root.querySelector("hui-card-element-editor.card-native"),
+          !query(root, "hui-card-element-editor.card-native"),
           "native editors never receive unknown $ keys"
         )
         const beforeBadEntity = changes.length
@@ -486,7 +500,7 @@
         await tick()
         assert(
           changes.length === beforeBadEntity &&
-            cardPanel.querySelector('[role="alert"]').textContent.includes("entity"),
+            query(cardPanel, '[role="alert"]').textContent.includes("entity"),
           "card YAML can't override query entities"
         )
         emit(yaml, "value-changed", {
@@ -494,9 +508,9 @@
           isValid: true,
         })
         await tick()
-        cardPanel.querySelector("button").click()
+        query(cardPanel, "button").click()
         await tick()
-        native = root.querySelector("hui-card-element-editor.card-native")
+        native = query(root, "hui-card-element-editor.card-native")
         assert(
           native?.value.type === "custom:mushroom-template-card" &&
             native.value.primary === "{{ entity }}",
@@ -508,7 +522,7 @@
           guiModeAvailable: false,
         })
         await tick()
-        yaml = root.querySelector("ha-yaml-editor.card-yaml")
+        yaml = query(root, "ha-yaml-editor.card-yaml")
         assert(
           yaml?.value.type === "custom:mushroom-template-card" &&
             changes.length === beforeUnsupported,
@@ -518,7 +532,7 @@
           JSON.stringify(base) === JSON.stringify(before),
           "all interactions preserve caller-owned input"
         )
-        const lastHeadingNative = root.querySelector("hui-card-element-editor.heading-native")
+        const lastHeadingNative = query(root, "hui-card-element-editor.heading-native")
         emit(lastHeadingNative, "config-changed", {
           config: { type: "heading", heading_style: "title", heading: "" },
         })
@@ -526,14 +540,14 @@
         assert(
           changes.at(-1).heading === undefined &&
             changes.at(-1).title === undefined &&
-            root.querySelector("hui-card-element-editor.heading-native") === lastHeadingNative,
+            query(root, "hui-card-element-editor.heading-native") === lastHeadingNative,
           "clearing all heading content removes it without removing its editor"
         )
         const emptyHeadingSaves = changes.length
         emit(lastHeadingNative, "config-changed", { config: lastHeadingNative.value })
         await tick()
         assert(changes.length === emptyHeadingSaves, "empty heading initialization stays unsaved")
-        headingPanel.querySelector("button").click()
+        query(headingPanel, "button").click()
         await tick()
         const beforeDetachedHeading = changes.length
         emit(lastHeadingNative, "config-changed", {
@@ -552,13 +566,15 @@
         )
         const templated = await makeEditor({ ...base, card: dynamic })
         assert(
-          templated.editor.shadowRoot.querySelector("ha-yaml-editor.card-yaml")?.value.tap_action
-            .$url_path === "{{ entity }}",
-          "existing templated cards start in safe YAML mode"
+          text(templated.editor.shadowRoot).includes("Resolving an editor snapshot") &&
+            !query(query(templated.editor.shadowRoot, "ha-expansion-panel.card"), "button")
+              .disabled,
+          "safe templated cards wait for a rendered snapshot and allow YAML editing"
         )
         templated.remove()
         const noDefaults = await makeEditor({ include: { type: "light" } })
-        const autoNative = noDefaults.editor.shadowRoot.querySelector(
+        const autoNative = query(
+          noDefaults.editor.shadowRoot,
           "hui-card-element-editor.card-native"
         )
         queries().at(-1).callback({ result: [] })
@@ -578,7 +594,7 @@
         )
         const legacy = await makeEditor({ ...base, title: "Legacy" })
         const legacyRoot = legacy.editor.shadowRoot
-        const legacyNative = legacyRoot.querySelector("hui-card-element-editor.heading-native")
+        const legacyNative = query(legacyRoot, "hui-card-element-editor.heading-native")
         assert(
           legacyNative.value.heading === "Legacy",
           "legacy title pre-fills the native Heading editor"
@@ -600,41 +616,310 @@
         await tick()
         const headingTemplates = await makeEditor({
           ...base,
-          heading: { heading: "{{ states('sensor.count') }}", $icon: "mdi:counter" },
+          heading: { $heading: "{{ states('sensor.count') }}", $icon: "mdi:counter" },
         })
         const headingTemplateRoot = headingTemplates.editor.shadowRoot
-        const headingYaml = headingTemplateRoot.querySelector("ha-yaml-editor.heading-yaml")
+        const headingQuery = queries().at(-1)
         assert(
-          headingYaml &&
-            !headingTemplateRoot.querySelector("hui-card-element-editor.heading-native"),
-          "templated headings use YAML rather than the native editor"
+          !("entity" in headingQuery.request.variables),
+          "heading editor templates have no implicit entity context"
+        )
+        headingQuery.callback({ result: ["Three active", "mdi:counter"] })
+        await tick()
+        const headingNativeTemplate = query(
+          headingTemplateRoot,
+          "hui-card-element-editor.heading-native"
         )
         assert(
-          headingYaml.value.heading === "{{ states('sensor.count') }}" &&
-            headingYaml.value.$icon === "mdi:counter",
-          "heading YAML preserves implicit text templates and explicit $ keys"
+          headingNativeTemplate?.value.heading === "Three active" &&
+            headingNativeTemplate.value.icon === "mdi:counter",
+          "templated headings use the same rendered visual editor as cards"
         )
-        assert(
-          headingTemplates.changes.length === 0,
-          "opening templated headings does not rewrite configuration"
-        )
-        emit(headingYaml, "value-changed", {
-          value: { ...headingYaml.value, $icon: "mdi:home" },
-          isValid: true,
+        emit(headingNativeTemplate, "config-changed", {
+          config: { ...headingNativeTemplate.value, badges: [] },
         })
         await tick()
         assert(
-          headingTemplates.changes.at(-1).heading.$icon === "mdi:home" &&
-            headingTemplates.changes.at(-1).heading.heading === "{{ states('sensor.count') }}",
-          "heading YAML edits retain both template forms"
+          headingTemplates.changes.length === 0,
+          "opening templated headings and native initialization do not rewrite configuration"
+        )
+        headingQuery.callback({ result: ["Four active", "mdi:home"] })
+        await tick()
+        assert(
+          headingNativeTemplate.value.heading === "Three active" &&
+            headingNativeTemplate.value.icon === "mdi:counter",
+          "heading editor snapshots stay stable across template updates"
+        )
+        headingNativeTemplate.dispatchEvent(new Event("input", { bubbles: true }))
+        emit(headingNativeTemplate, "config-changed", {
+          config: { ...headingNativeTemplate.value, heading_style: "subtitle" },
+        })
+        await tick()
+        assert(
+          headingTemplates.changes.at(-1).heading.heading_style === "subtitle" &&
+            headingTemplates.changes.at(-1).heading.$heading === "{{ states('sensor.count') }}" &&
+            headingTemplates.changes.at(-1).heading.$icon === "mdi:counter" &&
+            headingTemplates.changes.at(-1).heading.badges === undefined,
+          "static heading edits preserve template sources and omit native defaults"
+        )
+        const headingEdits = headingTemplates.changes.length
+        emit(headingNativeTemplate, "config-changed", {
+          config: {
+            ...headingNativeTemplate.value,
+            heading: "Attempted literal",
+            icon: "mdi:attempted",
+          },
+        })
+        await tick()
+        assert(
+          headingTemplates.changes.length === headingEdits &&
+            headingNativeTemplate.value.heading === "Three active" &&
+            text(headingTemplateRoot).includes("Template-controlled options were preserved"),
+          "heading template-controlled edits are restored with feedback"
         )
         headingTemplates.remove()
         await tick()
+        assert(
+          headingQuery.stopped,
+          "heading editor template subscriptions are released on disconnect"
+        )
+        const beforeLiteral = queries().length
+        const literalHeading = await makeEditor({
+          include: { type: "light" },
+          heading: "{{ literal text }}",
+        })
+        assert(
+          queries().length === beforeLiteral + 1 &&
+            query(literalHeading.editor.shadowRoot, "hui-card-element-editor.heading-native").value
+              .heading === "{{ literal text }}",
+          "unprefixed heading strings stay literal and require no heading subscription"
+        )
+        literalHeading.remove()
+        await tick()
+        const gridTemplates = await makeEditor({
+          include: { entity: "light.preview" },
+          card: { type: "tile", $name: "{{ entity }}" },
+        })
+        const gridTemplateQuery = queries().at(-1)
+        gridTemplateQuery.callback({
+          result: [{ entity: "light.preview", group: 0, values: ["First snapshot"] }],
+        })
+        await tick()
+        const gridTemplateNative = query(
+          gridTemplates.editor.shadowRoot,
+          "hui-card-element-editor.card-native"
+        )
+        assert(
+          gridTemplateNative?.value.name === "First snapshot",
+          "Auto Grid native editor receives its rendered query values"
+        )
+        gridTemplateQuery.callback({
+          result: [{ entity: "light.other", group: 0, values: ["Later snapshot"] }],
+        })
+        await tick()
+        assert(
+          gridTemplateNative.value.name === "First snapshot" &&
+            gridTemplateNative.value.entity === "light.preview",
+          "Auto Grid freezes the rendered editor snapshot across query updates"
+        )
+        gridTemplateNative.dispatchEvent(new Event("input", { bubbles: true }))
+        emit(gridTemplateNative, "config-changed", {
+          config: { ...gridTemplateNative.value, icon: "mdi:home" },
+        })
+        await tick()
+        assert(
+          gridTemplates.changes.at(-1).card.icon === "mdi:home" &&
+            gridTemplates.changes.at(-1).card.$name === "{{ entity }}" &&
+            !("entity" in gridTemplates.changes.at(-1).card),
+          "Auto Grid visual edits preserve templates without saving sample entities"
+        )
+        gridTemplates.remove()
+        await tick()
+        const autoEditor = await customElements.get("auto-card").getConfigElement()
+        const autoChanges = []
+        autoEditor.hass = hass
+        autoEditor.setConfig({
+          type: "custom:auto-card",
+          heading: "Controls",
+          card: {
+            type: "tile",
+            entity: "light.pool",
+            $name: "{{ states(entity) }}",
+            tap_action: { action: "url", $url_path: "{{ '/entity/' ~ entity }}" },
+          },
+        })
+        autoEditor.addEventListener("config-changed", (event) =>
+          autoChanges.push(event.detail.config)
+        )
+        const autoQueryIndex = queries().length
+        document.body.append(autoEditor)
+        await tick()
+        const autoRoot = autoEditor.shadowRoot
+        assert(
+          query(autoRoot, "ha-expansion-panel.heading") &&
+            query(autoRoot, "ha-expansion-panel.card") &&
+            !query(autoRoot, "ha-expansion-panel.selection") &&
+            !query(autoRoot, "ha-expansion-panel.grid"),
+          "Auto Card editor exposes only Heading and Card panels"
+        )
+        assert(
+          queries().length === autoQueryIndex + 1,
+          "Auto Card editor subscribes directly without an entity-selection query"
+        )
+        const autoQuery = queries().at(-1)
+        autoQuery.callback({ result: ["Pool", "/entity/light.pool"] })
+        await tick()
+        let singleNative = query(autoRoot, "hui-card-element-editor.card-native")
+        assert(
+          singleNative.value.name === "Pool" &&
+            singleNative.value.tap_action.url_path === "/entity/light.pool" &&
+            !("$name" in singleNative.value),
+          "native editor receives rendered values, not template sources"
+        )
+        emit(singleNative, "config-changed", { config: { ...singleNative.value, vertical: false } })
+        await tick()
+        assert(
+          autoChanges.length === 0,
+          "native initialization defaults never persist for templated cards"
+        )
+        autoQuery.callback({ result: ["Changed in preview", "/new-url"] })
+        await tick()
+        assert(
+          singleNative.value.name === "Pool" &&
+            singleNative.value.tap_action.url_path === "/entity/light.pool",
+          "backend updates never replace the editor snapshot while editing"
+        )
+        singleNative.dispatchEvent(new Event("input", { bubbles: true }))
+        emit(singleNative, "config-changed", {
+          config: { ...singleNative.value, icon: "mdi:pool" },
+        })
+        await tick()
+        const autoSaved = autoChanges.at(-1)
+        assert(
+          autoSaved.card.icon === "mdi:pool" &&
+            autoSaved.card.$name === "{{ states(entity) }}" &&
+            autoSaved.card.name === undefined &&
+            autoSaved.card.vertical === undefined &&
+            autoSaved.card.entity === "light.pool" &&
+            autoSaved.heading === "Controls" &&
+            !("include" in autoSaved),
+          "static edits preserve template sources and configured entities without saving defaults or grid fields"
+        )
+        assert(
+          query(autoRoot, "hui-card-element-editor.card-native") === singleNative,
+          "static template-aware edits retain the native editor instance"
+        )
+        emit(singleNative, "config-changed", {
+          config: {
+            ...singleNative.value,
+            name: "Attempted static name",
+            tap_action: { ...singleNative.value.tap_action, url_path: "/attempted" },
+          },
+        })
+        await tick()
+        assert(
+          autoChanges.length === 1 &&
+            text(autoRoot).includes("Template-controlled options were preserved") &&
+            singleNative.value.name === "Pool",
+          "edits to protected fields are restored with visible feedback, without persisting rendered values"
+        )
+        emit(singleNative, "config-changed", { config: { ...singleNative.value, type: "button" } })
+        await tick()
+        assert(
+          autoChanges.length === 1 &&
+            query(autoRoot, '[role="alert"]').textContent.includes("requires YAML"),
+          "type changes with templates require explicit YAML editing"
+        )
+        autoEditor.setConfig({ card: { type: "tile", features: [{ $label: "{{ entity }}" }] } })
+        await tick()
+        assert(
+          query(autoRoot, "ha-yaml-editor.card-yaml") &&
+            !query(autoRoot, "hui-card-element-editor.card-native"),
+          "templates inside arrays retain YAML fallback"
+        )
+        autoEditor.setConfig({ card: { $type: "{{ 'tile' }}" } })
+        await tick()
+        assert(
+          query(autoRoot, "ha-yaml-editor.card-yaml") &&
+            query(query(autoRoot, "ha-expansion-panel.card"), "button").disabled,
+          "templated root card types retain YAML fallback"
+        )
+        autoEditor.remove()
+        await tick()
+        assert(autoQuery.stopped, "Auto Card editor releases its template subscription")
+        const rootHeadingEditor = await customElements.get("auto-card").getConfigElement()
+        rootHeadingEditor.hass = hass
+        const rootHeadingSource = "{{ states('sensor.count') }}"
+        rootHeadingEditor.setConfig({
+          card: { type: "markdown", content: "Static" },
+          $heading: rootHeadingSource,
+        })
+        const rootHeadingChanges = []
+        rootHeadingEditor.addEventListener("config-changed", (event) =>
+          rootHeadingChanges.push(event.detail.config)
+        )
+        const beforeRootHeading = queries().length
+        document.body.append(rootHeadingEditor)
+        await tick()
+        const rootHeadingQuery = queries().at(-1)
+        assert(
+          queries().length === beforeRootHeading + 1 &&
+            !("entity" in rootHeadingQuery.request.variables),
+          "Auto Card root heading shorthand uses the shared heading editor without card entity context"
+        )
+        rootHeadingQuery.callback({ result: ["Rendered heading"] })
+        await tick()
+        const rootHeadingNative = query(
+          rootHeadingEditor.shadowRoot,
+          "hui-card-element-editor.heading-native"
+        )
+        assert(
+          rootHeadingNative.value.heading === "Rendered heading" && rootHeadingChanges.length === 0,
+          "opening a rendered root heading never rewrites the shorthand"
+        )
+        rootHeadingNative.dispatchEvent(new Event("input", { bubbles: true }))
+        emit(rootHeadingNative, "config-changed", {
+          config: { ...rootHeadingNative.value, icon: "mdi:counter" },
+        })
+        await tick()
+        assert(
+          rootHeadingChanges.at(-1).$heading === undefined &&
+            rootHeadingChanges.at(-1).heading.$heading === rootHeadingSource &&
+            rootHeadingChanges.at(-1).heading.heading === undefined &&
+            rootHeadingChanges.at(-1).heading.icon === "mdi:counter",
+          "heading visual edits canonicalize the shorthand while preserving its template source"
+        )
+        query(query(rootHeadingEditor.shadowRoot, "ha-expansion-panel.heading"), "button").click()
+        await tick()
+        const rootHeadingYaml = query(rootHeadingEditor.shadowRoot, "ha-yaml-editor.heading-yaml")
+        assert(
+          rootHeadingYaml.value.$heading === rootHeadingSource && rootHeadingQuery.stopped,
+          "heading YAML retains template sources and releases its editor subscription"
+        )
+        emit(rootHeadingYaml, "value-changed", { value: undefined, isValid: true })
+        await tick()
+        assert(
+          rootHeadingChanges.at(-1).heading === undefined &&
+            rootHeadingChanges.at(-1).$heading === undefined,
+          "clearing Heading YAML removes both normalized and shorthand forms"
+        )
+        rootHeadingEditor.setConfig({
+          card: { type: "markdown", content: "Static" },
+          heading: { badges: [{ type: "entity", $entity: "{{ 'sensor.count' }}" }] },
+        })
+        await tick()
+        assert(
+          query(rootHeadingEditor.shadowRoot, "ha-yaml-editor.heading-yaml") &&
+            !query(rootHeadingEditor.shadowRoot, "hui-card-element-editor.heading-native"),
+          "templated heading badge arrays use the same safe YAML fallback as cards"
+        )
+        rootHeadingEditor.remove()
+        await tick()
         document.body.dataset.status = "passed"
-        document.querySelector("#result").textContent = `Passed ${assertions} browser assertions`
+        query(document, "#result").textContent = `Passed ${assertions} browser assertions`
       } catch (error) {
         document.body.dataset.status = "failed"
-        document.querySelector("#result").textContent = error.stack
+        query(document, "#result").textContent = error.stack
       }
     </script>
   </body>
