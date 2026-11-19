@@ -1,5 +1,6 @@
 import { AutoGrid } from "./card.ts"
 import { AutoCard } from "./auto-card.ts"
+import { version } from "../package.json"
 
 if (!customElements.get("auto-card")) {
   customElements.define("auto-card", AutoCard)
@@ -22,5 +23,5 @@ if (!customElements.get("auto-grid")) {
     type: "auto-grid",
   })
   // oxlint-disable-next-line no-console
-  console.info("%cAuto Grid v0.1.0 is installed", "color: blue; font-weight: bold")
+  console.info(`%cAuto Grid v${version} is installed`, "color: blue; font-weight: bold")
 }
