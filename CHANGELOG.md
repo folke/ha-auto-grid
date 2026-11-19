@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.1](https://github.com/folke/ha-auto-grid/compare/v0.2.0...v0.2.1) (2026-11-19)
+
+
+### Bug Fixes
+
+* embed correct styler version during build ([04c5747](https://github.com/folke/ha-auto-grid/commit/04c57478bfc4ef48f0f649a26faf126a2f2310ab))
+
+
+### Performance Improvements
+
+* optimize state tracking of grid templates ([3708587](https://github.com/folke/ha-auto-grid/commit/3708587a483a94a24f473c8e6196990b5b5c0bbc))
+
 ## [0.2.0](https://github.com/folke/ha-auto-grid/compare/v0.1.1...v0.2.0) (2026-11-18)
 
 
