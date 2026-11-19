@@ -51,24 +51,11 @@ It is a standalone card, not a section or a drop-in auto-entities wrapper.
 
 [![Open your Home Assistant instance and open a repository in the Marketplace.](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=folke&repository=ha-auto-grid&category=plugin)
 
-### Marketplace / HACS
+Search for **Auto Grid** in HACS (Marketplace) and install it. The badge above
+opens its listing directly.
 
-Use the badge above to add this repository as a **Dashboard** plugin and install it.
-On older Home Assistant versions, add `https://github.com/folke/ha-auto-grid` as a
-custom Dashboard repository in HACS. The repository does not need to be in the
-central catalog to install it this way.
-
-The Marketplace downloads `auto-grid.js` from the GitHub release and normally
-registers the dashboard resource automatically. For YAML-managed resources, follow
-the resource instructions shown during installation.
-
-### Manual installation
-
-1. Download **`auto-grid.js`** from the [latest release](https://github.com/folke/ha-auto-grid/releases/latest).
-   Use the attached JavaScript asset, not GitHub's source ZIP.
-2. Copy it to `<config>/www/auto-grid.js`.
-3. Add `/local/auto-grid.js?v=0.1.1` as a dashboard resource with type **JavaScript
-   module**. Change the version query when updating to avoid stale browser caches.
+If Auto Grid doesn't show up in search, add `https://github.com/folke/ha-auto-grid`
+as a custom repository in HACS, choose the **Dashboard** category, and install it.
 
 Refresh the browser after installing or updating. Add a **Manual** card and paste
 the quick-start configuration below. A focused visual editor is available for layout
