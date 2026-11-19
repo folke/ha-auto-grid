@@ -355,6 +355,14 @@ sort:
 limit: 8
 ```
 
+### Update latency for broad filters
+
+Home Assistant rate-limits broad scans. A state-only rule such as `include: { state: unavailable }`
+can take about **one minute** to update; a domain-scoped rule such as
+`include: { domain: sensor, state: unavailable }` typically updates within **one second**.
+For alert or status grids that need immediate updates, scope the rule to explicit entity IDs
+or a dedicated label or integration instead of scanning all states.
+
 Raw selection templates, nested attribute paths, translated-state matching, relative-time
 rules, and per-group sorting/pagination are not implemented. Heading and explicit `$`
 card-option templates are supported. Unknown filter rules

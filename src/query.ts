@@ -201,9 +201,20 @@ function validateFilter(filter: Filter, depth = 0): void {
   }
 }
 
-function predicate(filter: Filter, sets: Map<string, string>): string {
+function predicate(
+  filter: Filter,
+  sets: Map<string, string>,
+  stateObject = false,
+  hoistedEntity = false
+): string {
   const expressions: string[] = []
-  for (const [key, value] of Object.entries(filter)) {
+  const entries = Object.entries(filter)
+  const rank = (key: string) => {
+    if (key === "entity") return 0
+    return key === "domain" ? 1 : 2
+  }
+  entries.sort(([left], [right]) => rank(left) - rank(right))
+  for (const [key, value] of entries) {
     if (["area", "floor", "label", "integration"].includes(key)) {
       const source = membership(key, strings(value, key))
       if (!sets.has(source)) sets.set(source, `ag_members_${sets.size}`)
@@ -213,12 +224,13 @@ function predicate(filter: Filter, sets: Map<string, string>): string {
         join(
           [
             match("device_id(entity)", value as Selection),
-            match(fieldValue("device", 0), value as Selection),
+            match(fieldValue("device", 0, stateObject), value as Selection),
           ],
           "or"
         )
       )
     } else if (key === "entity") {
+      if (hoistedEntity) continue
       expressions.push(
         join(
           strings(value, key, true).map((id) => matchOne("entity", id)),
@@ -226,12 +238,14 @@ function predicate(filter: Filter, sets: Map<string, string>): string {
         )
       )
     } else if (key === "domain") {
-      expressions.push(`${fieldValue("domain", 0)} in ${JSON.stringify(strings(value, key))}`)
+      expressions.push(
+        `${fieldValue("domain", 0, stateObject)} in ${JSON.stringify(strings(value, key))}`
+      )
     } else if (key === "type") {
       expressions.push(
         join(
           strings(value, key).map((type) =>
-            matchOne(fieldValue(type.includes("/") ? "type" : "domain", 0), type)
+            matchOne(fieldValue(type.includes("/") ? "type" : "domain", 0, stateObject), type)
           ),
           "or"
         )
@@ -240,7 +254,7 @@ function predicate(filter: Filter, sets: Map<string, string>): string {
       const values = Array.isArray(value) ? value : [value]
       expressions.push(
         match(
-          fieldValue("state", 0),
+          fieldValue("state", 0, stateObject),
           values.map((v) => {
             if (typeof v === "boolean") return v ? "on" : "off"
             return v
@@ -248,12 +262,14 @@ function predicate(filter: Filter, sets: Map<string, string>): string {
         )
       )
     } else if (key === "hidden") {
-      const target = fieldValue(key, 0)
+      const target = fieldValue(key, 0, stateObject)
       expressions.push(value ? target : `not ${target}`)
     } else if (key === "all" || key === "any") {
       expressions.push(
         join(
-          (value as Filter[]).map((f) => predicate(f, sets)),
+          (value as Filter[]).map((f) =>
+            predicate(f, sets, stateObject, hoistedEntity && key === "all")
+          ),
           key === "all" ? "and" : "or"
         )
       )
@@ -261,46 +277,74 @@ function predicate(filter: Filter, sets: Map<string, string>): string {
       const children = Array.isArray(value) ? value : [value]
       expressions.push(
         `not ${join(
-          children.map((child) => predicate(child as Filter, sets)),
+          children.map((child) => predicate(child as Filter, sets, stateObject)),
           "or"
         )}`
       )
     } else {
-      expressions.push(match(fieldValue(key as FilterField, 0), value as Selection))
+      expressions.push(match(fieldValue(key as FilterField, 0, stateObject), value as Selection))
     }
   }
   return join(expressions, "and")
 }
 
-// A restriction in an AND branch is a safe candidate set. Restrictions under OR/NOT aren't.
-function candidates(filter: Filter): { source: string; trackLifecycle: boolean } {
+type Candidates = { ids: string } | { scans: string[] }
+
+// A restriction in an AND branch is safe; restrictions under OR/NOT aren't.
+function candidates(filter: Filter): Candidates {
   for (const key of ["area", "label", "floor", "integration"] as const) {
-    if (filter[key] !== undefined)
-      return { source: membership(key, strings(filter[key], key)), trackLifecycle: true }
+    if (filter[key] !== undefined) return { ids: membership(key, strings(filter[key], key)) }
   }
   if (filter.entity !== undefined) {
     const ids = strings(filter.entity, "entity", true)
-    if (ids.every((id) => entityId.test(id)))
-      return { source: JSON.stringify(ids), trackLifecycle: true }
+    if (ids.every((id) => entityId.test(id))) return { ids: JSON.stringify(ids) }
   }
   for (const child of filter.all ?? []) {
     const source = candidates(child)
-    if (source.source !== "states | map(attribute='entity_id') | list") return source
+    if ("ids" in source || source.scans[0] !== "states") return source
   }
-  let domains: string[] | undefined
+  let domains: string[] = []
   if (filter.domain !== undefined) domains = strings(filter.domain, "domain")
   else if (filter.type !== undefined)
-    domains = [...new Set(strings(filter.type, "type").map((type) => type.split("/")[0]))]
-  if (domains) {
-    return {
-      source: `(${domains.map((d) => `(states.${d} | map(attribute='entity_id') | list)`).join(" + ")})`,
-      trackLifecycle: false,
-    }
-  }
-  return { source: "states | map(attribute='entity_id') | list", trackLifecycle: false }
+    domains = strings(filter.type, "type").map((type) => type.split("/")[0])
+  return { scans: domains.length ? [...new Set(domains)].map((d) => `states.${d}`) : ["states"] }
 }
 
-export function fieldValue(field: SortField, include: number): string {
+function entityChecks(filter: Filter, sourceIds?: string): string[] {
+  const checks: string[] = []
+  if (filter.entity !== undefined) {
+    const ids = strings(filter.entity, "entity", true)
+    if (JSON.stringify(ids) !== sourceIds) {
+      checks.push(
+        join(
+          ids.map((id) => matchOne("entity", id)),
+          "or"
+        )
+      )
+    }
+  }
+  for (const child of filter.all ?? []) checks.push(...entityChecks(child, sourceIds))
+  return checks
+}
+
+// Only use per-entity tracking when a positive ID constraint is plausibly selective.
+function hasSelectiveEntityCheck(filter: Filter): boolean {
+  if (filter.entity !== undefined) {
+    const ids = strings(filter.entity, "entity", true)
+    if (
+      ids.length &&
+      ids.every((id) => {
+        if (entityId.test(id)) return true
+        if (id.startsWith("/")) return false
+        return id.replace(/^[a-z0-9_*]+\./, "").replaceAll("*", "").length > 0
+      })
+    )
+      return true
+  }
+  return filter.all?.some(hasSelectiveEntityCheck) ?? false
+}
+
+export function fieldValue(field: SortField, include: number, stateObject = false): string {
   switch (field) {
     case "group": {
       return `ag_groups[${include}]`
@@ -321,7 +365,10 @@ export function fieldValue(field: SortField, include: number): string {
       return "entity.split('.')[0]"
     }
     case "type": {
-      return "(entity.split('.')[0] ~ ('/' ~ state_attr(entity, 'device_class') if state_attr(entity, 'device_class') else ''))"
+      const deviceClass = stateObject
+        ? "ag_state.attributes.get('device_class')"
+        : "state_attr(entity, 'device_class')"
+      return `(entity.split('.')[0] ~ ('/' ~ ${deviceClass} if ${deviceClass} else ''))`
     }
     case "hidden": {
       return "is_hidden_entity(entity)"
@@ -336,17 +383,23 @@ export function fieldValue(field: SortField, include: number): string {
       return "entity_name(entity, fallback=true)"
     }
     case "state": {
-      return "states(entity)"
+      return stateObject ? "ag_state.state" : "states(entity)"
     }
     case "last_changed": {
-      return "as_timestamp(states[entity].last_changed)"
+      return stateObject
+        ? "as_timestamp(ag_state.last_changed)"
+        : "as_timestamp(states[entity].last_changed)"
     }
     case "last_updated": {
-      return "as_timestamp(states[entity].last_updated)"
+      return stateObject
+        ? "as_timestamp(ag_state.last_updated)"
+        : "as_timestamp(states[entity].last_updated)"
     }
     default: {
       if (field.startsWith("attr.") && field.length > 5) {
-        return `state_attr(entity, ${literal(field.slice(5))})`
+        return stateObject
+          ? `ag_state.attributes.get(${literal(field.slice(5))})`
+          : `state_attr(entity, ${literal(field.slice(5))})`
       }
       throw new Error(`Unknown field: ${field}`)
     }
@@ -420,18 +473,49 @@ function compileQuery(
 ): string {
   const headingPlan = groupConfig ? compileHeadingOptions(groupConfig.heading) : undefined
   const sets = new Map<string, string>()
-  const exclusion = join(
-    excludes.map((filter) => predicate(filter, sets)),
-    "or"
-  )
-  let needsLifecycle = false
+  const sources = includes.map(candidates)
+  const scanCounts = new Map<string, number>()
+  for (const source of sources) {
+    if ("scans" in source)
+      for (const scan of source.scans) scanCounts.set(scan, (scanCounts.get(scan) ?? 0) + 1)
+  }
+  const scanLists = new Map<string, string>()
+  for (const [scan, count] of scanCounts) {
+    if (count > 1) scanLists.set(scan, `ag_scan_${scanLists.size}`)
+  }
+  const needsLifecycle = sources.some((source) => "ids" in source)
   const trackSeen = includes.length > 1
   const groups = includes.map((filter, group) => {
-    const condition = predicate(filter, sets)
-    const { source, trackLifecycle } = candidates(filter)
-    needsLifecycle ||= trackLifecycle
+    const source = sources[group]
+    const idChecks = entityChecks(filter, "ids" in source ? source.ids : undefined)
+    // A glob can make a broad source selective: do the ID check before tracking each match.
+    const stateObject = "scans" in source && !hasSelectiveEntityCheck(filter)
+    const condition = predicate(filter, sets, stateObject, true)
+    const exclusion = join(
+      excludes.map((rule) => predicate(rule, sets, stateObject)),
+      "or"
+    )
+    const scanned =
+      "scans" in source
+        ? source.scans
+            .map(
+              (scan) => scanLists.get(scan) ?? (source.scans.length > 1 ? `(${scan} | list)` : scan)
+            )
+            .join(" + ")
+        : ""
+    const start =
+      "ids" in source
+        ? [`{% for entity in (${sets.get(source.ids) ?? source.ids}) | unique | list %}`]
+        : [`{% for ag_state in (${scanned}) %}`, "{% set entity = ag_state.entity_id %}"]
+    const guards = [
+      ...(trackSeen ? ["entity not in ns.seen"] : []),
+      ...idChecks,
+      ...("ids" in source ? ["states[entity] is defined and states[entity] is not none"] : []),
+      condition,
+      `not ${exclusion}`,
+    ]
     const values = sorts.map((sort, index) => {
-      const value = fieldValue(sort.by, group)
+      const value = fieldValue(sort.by, group, stateObject)
       let prepared = `(${value} | default('', true) | string)`
       if (numericSort(sort)) prepared = `(${value} | float(none))`
       else if (sort.by === "group")
@@ -445,11 +529,11 @@ function compileQuery(
       ...(groupConfig ? ["'bucket': ag_value", "'bucket_key': ag_key"] : []),
     ].join(", ")
     return [
-      `{% for entity in (${sets.get(source) ?? source}) | unique | list %}`,
-      `{% if ${trackSeen ? "entity not in ns.seen and " : ""}states[entity] is defined and states[entity] is not none and ${condition} and not ${exclusion} %}`,
+      ...start,
+      `{% if ${join(guards, "and")} %}`,
       ...(groupConfig
         ? [
-            `{% set ag_value = ${fieldValue(groupConfig.by, group)} %}`,
+            `{% set ag_value = ${fieldValue(groupConfig.by, group, stateObject)} %}`,
             "{% if ag_value is number and ag_value is not boolean and ag_value == (ag_value | int) %}{% set ag_value = ag_value | int %}{% endif %}",
             "{% set ag_key = ag_group_key(ag_value) %}",
           ]
@@ -461,10 +545,9 @@ function compileQuery(
     ].join("\n")
   })
   // Counting states tracks additions/removals, not ordinary changes or a full-state iteration.
-  // Candidate discovery in the map callback above can enable lifecycle tracking.
-  // oxlint-disable-next-line typescript/no-unnecessary-condition
   const lines = needsLifecycle ? ["{% set ag_lifecycle = states | count %}"] : []
   lines.push(...[...sets].map(([expression, name]) => `{% set ${name} = ${expression} %}`))
+  lines.push(...[...scanLists].map(([scan, name]) => `{% set ${name} = ${scan} | list %}`))
   options.forEach(({ templates }, group) =>
     templates.forEach(({ source }, index) => {
       lines.push(

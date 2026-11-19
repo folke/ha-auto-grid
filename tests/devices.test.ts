@@ -16,10 +16,13 @@ test("device patterns check IDs and effective names without unsafe device candid
   assert.match(template, /device_id\(entity\)/)
   assert.match(template, /device_name\(entity\)/)
   assert.match(template, /integration_entities\("omada_open_api"\)/)
-  assert.doesNotMatch(template, /device_entities|states \| map/)
-  assert.match(query({ device: "dev_pixel" }), /states \| map/)
+  assert.doesNotMatch(template, /device_entities|for ag_state in \(states\)/)
+  assert.match(query({ device: "dev_pixel" }), /for ag_state in \(states\)/)
   assert.match(query({ domain: "device_tracker", device: "/Pixel/" }), /states.device_tracker/)
-  assert.doesNotMatch(query({ domain: "device_tracker", device: "/Pixel/" }), /states \| map/)
+  assert.doesNotMatch(
+    query({ domain: "device_tracker", device: "/Pixel/" }),
+    /for ag_state in \(states\)/
+  )
   assert.match(query({ area: "office", device: "/Pixel/" }), /area_entities\("office"\)/)
   assert.match(
     query({ all: [{ integration: "omada_open_api" }, { device: "/Pixel/" }] }),

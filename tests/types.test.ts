@@ -13,12 +13,15 @@ test("entity type syntax is validated and narrows candidates to unique domains",
   const template = query({
     type: ["sensor/battery", "sensor/temperature", "binary_sensor/battery"],
   })
-  assert.equal(template.match(/states.sensor \| map/g)!.length, 1)
-  assert.match(template, /states.binary_sensor \| map/)
-  assert.doesNotMatch(template, /states \| map/)
-  assert.doesNotMatch(query({ all: [{ type: "sensor/battery" }] }), /states \| map/)
-  assert.match(query({ not: { type: "sensor/battery" } }), /states \| map/)
-  assert.match(query({ any: [{ type: "light" }, { type: "sensor" }] }), /states \| map/)
+  assert.equal(template.match(/states\.sensor \| list/g)!.length, 1)
+  assert.match(template, /states\.binary_sensor \| list/)
+  assert.doesNotMatch(template, /for ag_state in \(states\)/)
+  assert.doesNotMatch(query({ all: [{ type: "sensor/battery" }] }), /for ag_state in \(states\)/)
+  assert.match(query({ not: { type: "sensor/battery" } }), /for ag_state in \(states\)/)
+  assert.match(
+    query({ any: [{ type: "light" }, { type: "sensor" }] }),
+    /for ag_state in \(states\)/
+  )
   for (const type of [
     null,
     [],
@@ -38,7 +41,7 @@ test("entity type syntax is validated and narrows candidates to unique domains",
   assert.throws(() => normalizeConfig({ include: { device_class: "battery" } }), /Unknown filter/)
   assert.throws(() => normalizeConfig({ include: {}, sort: "device_class" }), /Unknown sort/)
   assert.throws(() => normalizeConfig({ include: {}, group: "device_class" }), /Unknown group/)
-  assert.ok(query({}, { sort: "type" }).includes(fieldValue("type", 0)))
+  assert.ok(query({}, { sort: "type" }).includes(fieldValue("type", 0, true)))
   assert.equal(
     fieldTitle("type"),
     "(group.split('/')[-1].split('_') | map('capitalize') | join(' '))"

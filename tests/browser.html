@@ -627,8 +627,9 @@
           "a real nested Auto Grid subscribes using its rendered entity lists"
         )
         assert(
-          subscriptions[parentIndex + 1].request.template.includes('["sensor.b","sensor.a"]') &&
-            !subscriptions[parentIndex + 1].request.template.includes("states | map"),
+          subscriptions[parentIndex + 1].request.template.includes(
+            'for entity in (["sensor.b","sensor.a"])'
+          ) && !subscriptions[parentIndex + 1].request.template.includes("for ag_state in "),
           "JSON child IDs compile directly to candidates"
         )
         subscriptions[parentIndex + 1].callback({

@@ -111,10 +111,12 @@ The compiler narrows candidates to an area/label/floor/integration, explicit IDs
 or domains/types where it can do so safely. Membership helpers are evaluated once per template render,
 not once per entity. OR/NOT-only queries may require a full state scan.
 
-HA can rate-limit templates that iterate all states (typically once per minute), or
-all entities of a domain (typically once per second). A scoped candidate list avoids
-those broad iteration patterns, though it still reads the states needed for filtering
-and sorting. Backend work is reduced in scope, not eliminated.
+Broad scans use state objects for built-in filtering, sorting, and grouping, so
+HA can apply its normal domain (typically one second) or all-state (typically one
+minute) rate limit instead of tracking each entity individually. Include groups
+that use the same state source reuse its candidate list in order. For a selective
+ID constraint, the ID check runs before state or attribute reads, so matching IDs
+can still update immediately. Custom Jinja can add its own dependencies.
 
 Registry-driven refreshes are event-based and coalesced rather than synchronous with
 the edit. Ordinary state-driven updates remain governed by HA's template dependency

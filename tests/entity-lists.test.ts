@@ -17,8 +17,11 @@ test("entity lists are native lists, not specially parsed strings", () => {
     ["sensor.*", "/^light[.]/"],
   ])
     assert.notEqual(query({ entity: JSON.stringify(ids) }), query({ entity: ids }))
-  assert.doesNotMatch(query({ entity: ["sensor.b", "sensor.a"] }), /states \| map/)
-  assert.doesNotMatch(query({ entity: [] }), /states \| map/)
+  assert.match(
+    query({ entity: ["sensor.b", "sensor.a"] }),
+    /for entity in \(\["sensor.b","sensor.a"\]\)/
+  )
+  assert.match(query({ entity: [] }), /for entity in \(\[\]\)/)
   for (const value of [[null], [true], [3], [{}], [[]], [""], ["  "]])
     assert.throws(() => query({ entity: value }), /non-empty strings/)
   assert.throws(() => query({ area: [] }))
@@ -115,7 +118,9 @@ test(
           )
         )
       )
-      children.forEach((child) => assert.doesNotMatch(child.query.template, /states \| map/))
+      assert.match(children[0].query.template, /for entity in \(\["sensor\.b","sensor\.a"\]\)/)
+      assert.match(children[1].query.template, /for entity in \(\[\]\)/)
+      children.forEach((child) => assert.doesNotMatch(child.query.template, /for ag_state in /))
       const results = execute(children.map((child) => ({ states, template: child.query.template })))
       const byEntity = new Map(
         matches.map((row, i) => [row.entity, results[i].map(({ entity }) => entity)])

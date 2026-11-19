@@ -92,14 +92,14 @@ test("area queries restrict candidates and hoist shared registry helpers", () =>
   )
   assert.equal(template.match(/area_entities\("pool"\)/g)!.length, 1)
   assert.match(template, /for entity in \(ag_members_0\)/)
-  assert.doesNotMatch(template, /states \| map/)
+  assert.doesNotMatch(template, /for ag_state in \(states\)/)
 })
 
 test("domain queries avoid iterating all states", () => {
   const template = query({ domain: ["light", "switch"] })
   assert.match(template, /states.light/)
   assert.match(template, /states.switch/)
-  assert.doesNotMatch(template, /states \| map/)
+  assert.doesNotMatch(template, /for ag_state in \(states\)/)
 })
 
 test("AND constraints can restrict candidates, but OR and NOT cannot", () => {
@@ -107,13 +107,19 @@ test("AND constraints can restrict candidates, but OR and NOT cannot", () => {
     query({ all: [{ area: "pool" }, { state: "on" }] }),
     /for entity in \(ag_members_0\)/
   )
-  assert.match(query({ any: [{ area: "pool" }, { domain: "light" }] }), /states \| map/)
-  assert.match(query({ not: { domain: "light" } }), /states \| map/)
+  assert.match(
+    query({ any: [{ area: "pool" }, { domain: "light" }] }),
+    /for ag_state in \(states\)/
+  )
+  assert.match(query({ not: { domain: "light" } }), /for ag_state in \(states\)/)
 })
 
 test("literal entity IDs avoid a full state scan; wildcard IDs don't", () => {
-  assert.doesNotMatch(query({ entity_id: ["light.pool", "light.hall"] }), /states \| map/)
-  assert.match(query({ entity_id: "light.*" }), /states \| map/)
+  assert.doesNotMatch(
+    query({ entity_id: ["light.pool", "light.hall"] }),
+    /for ag_state in \(states\)/
+  )
+  assert.match(query({ entity_id: "light.*" }), /for ag_state in \(states\)/)
 })
 
 test("explicit sort replaces defaults; empty sorts disable all sorting including tie-breaker", () => {
@@ -185,7 +191,10 @@ test("fieldValue supplies every sortable filter field and optional by defaults t
     "attr.battery",
   ]
   for (const field of fields) {
-    assert.ok(query({ domain: "sensor" }, { sort: field }).includes(fieldValue(field, 0)), field)
+    assert.ok(
+      query({ domain: "sensor" }, { sort: field }).includes(fieldValue(field, 0, true)),
+      field
+    )
   }
   assert.equal(fieldValue("group", 12), "ag_groups[12]")
   assert.equal(query({}, { sort: {} }), query({}, { sort: "name" }))
@@ -204,14 +213,14 @@ test("integration candidates and predicates share one hoisted membership lookup"
     { exclude: { integration: "mqtt", hidden: true } }
   )
   assert.equal(template.match(/integration_entities\("mqtt"\)/g)!.length, 1)
-  assert.doesNotMatch(template, /states \| map/)
+  assert.doesNotMatch(template, /for ag_state in \(states\)/)
   assert.match(template, /for entity in \(ag_members_0\)/)
   assert.doesNotMatch(query({ not: { integration: "mqtt" } }), /for entity in \(ag_members_0\)/)
 })
 
 test("timestamp rules use the same Unix timestamp expressions as sorting", () => {
   for (const field of ["last_changed", "last_updated"] as const) {
-    assert.ok(query({ [field]: "> 1767225600" }).includes(fieldValue(field, 0)))
+    assert.ok(query({ [field]: "> 1767225600" }).includes(fieldValue(field, 0, true)))
     assert.throws(() => normalizeConfig({ include: { [field]: {} } }))
   }
   for (const integration of [null, 3, [], [null], {}]) {
@@ -229,7 +238,7 @@ test("attribute filter names are literal, quoted, and non-empty", () => {
   ]) {
     assert.ok(
       query({ [`attr.${attribute}`]: true }).includes(
-        `state_attr(entity, ${JSON.stringify(attribute)})`
+        `ag_state.attributes.get(${JSON.stringify(attribute)})`
       )
     )
   }
@@ -275,8 +284,8 @@ test("only state booleans normalize to on/off, including lists and nested exclus
       query({}, { exclude: { any: [{ state: expected }] } })
     )
   }
-  assert.match(query({ "attr.flag": true }), /state_attr\(entity, "flag"\) == true/)
-  assert.match(query({ "attr.flag": false }), /state_attr\(entity, "flag"\) == false/)
+  assert.match(query({ "attr.flag": true }), /ag_state\.attributes\.get\("flag"\) == true/)
+  assert.match(query({ "attr.flag": false }), /ag_state\.attributes\.get\("flag"\) == false/)
   const input = { include: { state: [true, false, "on"] } }
   const before = structuredClone(input)
   normalizeConfig(input)
@@ -391,7 +400,7 @@ test("limits, numeric comparison, and multi-sort are compiled into the backend q
     { domain: "sensor", state: "< 20" },
     { sort: [{ by: "group" }, { by: "state", numeric: true, reverse: true }], limit: 5 }
   )
-  assert.match(template, /is_number\(states\(entity\)\)/)
+  assert.match(template, /is_number\(ag_state\.state\)/)
   assert.match(template, /float\) < 20/)
   assert.match(template, /reverse=true/)
   assert.match(template, /ns.rows\[:5\]/)
@@ -402,11 +411,58 @@ test("single-include queries rely on unique candidates without redundant seen tr
   for (const include of [{ state: "unavailable" }, { entity: ["light.a", "light.a"] }]) {
     const template = query(include)
     assert.doesNotMatch(template, /ns\.seen|seen=\[\]/)
-    assert.match(template, /\| unique \| list/)
+    if ("entity" in include) assert.match(template, /\| unique \| list/)
+    else assert.match(template, /for ag_state in \(states\)/)
   }
   const multiple = query([{ domain: "light" }, { state: "unavailable" }])
   assert.match(multiple, /entity not in ns\.seen/)
   assert.match(multiple, /ns\.seen = ns\.seen \+ \[entity\]/)
+})
+
+test("battery ID glob runs before device class and retains per-entity sorting", () => {
+  const options = { sort: { by: "state", numeric: true } }
+  const template = query({ type: "sensor/battery", entity: "*battery_plus" }, options)
+  assert.equal(template, query({ entity: "*battery_plus", type: "sensor/battery" }, options))
+  assert.ok(
+    template.indexOf("battery_plus") < template.indexOf("state_attr(entity, 'device_class')")
+  )
+  assert.match(template, /states\(entity\) \| float/)
+  assert.equal(template.match(/battery_plus/g)?.length, 1)
+  for (const entity of ["*", "sensor.*"]) {
+    assert.doesNotMatch(
+      query({ type: "sensor/battery", entity }, options),
+      /states\(entity\)|state_attr\(entity/
+    )
+  }
+})
+
+test("only entity checks in positive conjunctions move to the early guard", () => {
+  const template = query({
+    all: [
+      { entity: "*required*" },
+      { any: [{ entity: "*either*" }, { state: "on" }] },
+      { not: { entity: "*blocked*" } },
+    ],
+  })
+  assert.equal(template.match(/required/g)?.length, 1)
+  assert.match(template, /either.* or .*states\(entity\) == "on"/)
+  assert.match(template, /not \(\(.*blocked/)
+  const exact = query({
+    all: [{ entity: ["sensor.first", "sensor.second"] }, { entity: "*second" }],
+  })
+  assert.equal(exact.match(/sensor\.first/g)?.length, 1)
+  assert.match(exact, /for entity in \(\["sensor\.first","sensor\.second"\]\)/)
+  assert.match(exact, /is search\("\^\.\*second\$"\)/)
+})
+
+test("include groups with a common domain reuse the scanned candidates", () => {
+  const template = query([
+    { type: "sensor/temperature", state: "> 30" },
+    { type: "sensor/humidity", state: "> 70" },
+  ])
+  assert.equal(template.match(/states\.sensor/g)?.length, 1)
+  assert.equal(template.match(/for ag_state in \(ag_scan_0\)/g)?.length, 2)
+  assert.match(template, /entity not in ns\.seen/)
 })
 
 test("card-only edits generate the exact same query for sharing subscriptions", () => {
